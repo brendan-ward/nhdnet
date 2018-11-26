@@ -22,7 +22,7 @@ from nhdnet.nhd.network import generate_network, calculate_network_stats
 SNAP_TOLERANCE_DAMS = 200  # meters  FIXME: should be 100m
 SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
-HUC4 = "0307"
+HUC4 = "0602"
 src_dir = "/Users/bcward/projects/data/sarp"
 working_dir = "{0}/nhd/{1}".format(src_dir, HUC4)
 os.chdir(working_dir)
@@ -147,10 +147,20 @@ print("Done cutting in {:.2f}".format(time() - cut_start))
 print("------------------- Creating networks -----------")
 network_start = time()
 # remove any origin segments
-barrier_segments = set(barrier_joins.upstream_id.unique()).difference({0})
+barrier_segments = list(set(barrier_joins.upstream_id.unique()).difference({0}))
 
-get_upstream_ids = lambda id: joins.loc[joins.downstream_id == id].upstream_id
-has_multiple_downstreams = lambda id: len(joins.loc[joins.upstream_id == id]) > 1
+print("generating upstream / downstream indices")
+join_ids = joins[["downstream_id", "upstream_id"]]
+upstreams = (
+    join_ids.groupby("downstream_id")["upstream_id"]
+    .unique()
+    .reset_index()
+    .set_index("downstream_id")
+)
+downstreams = join_ids.groupby("upstream_id")["downstream_id"].size()
+
+get_upstream_ids = lambda id: upstreams.loc[id].upstream_id
+has_multiple_downstreams = lambda id: downstreams.loc[id] > 1
 
 # Create networks from all terminal nodes (no downstream nodes) up to origins or dams (but not including dam segments)
 # Note: origins are also those that have a downstream_id but are not the upstream_id of another node
@@ -167,7 +177,7 @@ for start_id in root_ids:
         start_id,
         get_upstream_ids,
         has_multiple_downstreams,
-        stop_segments=barrier_segments.copy(),
+        stop_segments=set(barrier_segments),
     )
 
     rows = flowlines.index.isin(network)
@@ -186,7 +196,7 @@ for start_id in barrier_segments:
         start_id,
         get_upstream_ids,
         has_multiple_downstreams,
-        stop_segments=barrier_segments.copy(),
+        stop_segments=set(barrier_segments),
     )
 
     rows = flowlines.index.isin(network)
