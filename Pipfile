@@ -8,6 +8,7 @@ pandas = "*"
 geopandas = "*"
 rtree = "*"
 nhdnet = {editable = true, path = "."}
+feather-format = "*"
 
 [dev-packages]
 

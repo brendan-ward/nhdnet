@@ -17,10 +17,9 @@ TODO: add other attributes to keep throughout, including size info for plotting
 """
 
 import os
-from time import time
 import geopandas as gp
 import pandas as pd
-
+from shapely.geometry import MultiLineString
 from nhdnet.geometry.lines import to2D, calculate_sinuosity
 
 
@@ -28,14 +27,23 @@ FLOWLINE_COLS = [
     "NHDPlusID",
     "FlowDir",
     "FType",
-    "FCode",
+    # "FCode",
+    "GNIS_ID",
     "GNIS_Name",
-    "ReachCode",
+    # "ReachCode",
     "geometry",
 ]
 
 # TODO: add elevation gradient info
-VAA_COLS = ["NHDPlusID", "StreamOrde", "StreamCalc", "TotDASqKm"]
+VAA_COLS = [
+    "NHDPlusID",
+    "StreamOrde",
+    "StreamCalc",
+    "TotDASqKm",
+    # "MaxElevSmo",
+    # "MinElevSmo",
+    # "Slope",
+]
 
 
 def extract_flowlines(gdb_path, target_crs):
@@ -57,9 +65,15 @@ def extract_flowlines(gdb_path, target_crs):
     """
 
     # Read in data and convert to data frame (no need for geometry)
-    start = time()
     print("Reading flowlines")
-    df = gp.read_file(gdb_path, layer="NHDFlowline")[FLOWLINE_COLS]
+
+    # Some GDBs from NHD are not correct and have unsupported geometry types.  Convert them first using ogr2ogr
+    in_shp = os.path.join(os.path.dirname(gdb_path), "NHDFlowline.shp")
+    if os.path.exists(in_shp):
+        df = gp.read_file(in_shp)[FLOWLINE_COLS]
+
+    else:
+        df = gp.read_file(gdb_path, layer="NHDFlowline")[FLOWLINE_COLS]
     # Set our internal master IDs to the original index of the file we start from
     # Assume that we can always fit into a uint32, which is ~400 million records
     # and probably bigger than anything we could ever read in
@@ -99,11 +113,16 @@ def extract_flowlines(gdb_path, target_crs):
     df.loc[(drainage >= 10000) & (drainage < 25000), "sizeclass"] = "4"
     df.loc[drainage >= 25000, "sizeclass"] = "5"
 
+    # convert to LineString from MultiLineString
+    if df.iloc[0].geometry.geom_type == "MultiLineString":
+        print("Converting MultiLineString => LineString")
+        df.geometry = df.geometry.apply(
+            lambda g: g[0] if isinstance(g, MultiLineString) else g
+        )
+
     # Convert incoming data from XYZM to XY
     print("Converting geometry to 2D")
     df.geometry = df.geometry.apply(to2D)
-    # convert to LineString from MultiLineString
-    df.geometry = df.geometry.apply(lambda g: g[0])
 
     print("projecting to target projection")
     df = df.to_crs(target_crs)
@@ -112,6 +131,9 @@ def extract_flowlines(gdb_path, target_crs):
     print("Calculating length and sinuosity")
     df["length"] = df.geometry.length.astype("float32")
     df["sinuosity"] = df.geometry.apply(calculate_sinuosity).astype("float32")
+
+    # Drop columns we don't need any more for faster I/O
+    df = df.drop(columns=["FlowDir", "TotDASqKm", "StreamCalc"])
 
     ############# Connections between segments ###################
     print("Reading segment connections")
@@ -143,7 +165,5 @@ def extract_flowlines(gdb_path, target_crs):
 
     # Note: this doesn't seem to be working, because outflowing rivers are coded as 0 by NHD
     # join_df.loc[(join_df.downstream != 0) & (join_df.downstream_id == 0), 'type'] = 'huc_out'
-
-    print("Done in {:.2f}".format(time() - start))
 
     return df, join_df
