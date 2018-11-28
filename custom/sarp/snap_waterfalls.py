@@ -5,6 +5,12 @@ ogr2ogr -t_srs "EPSG:102003" -f "ESRI Shapefile" dams_11272018.shp All_Dams_Merg
 
 ogr2ogr -t_srs "EPSG:102003" -f "ESRI Shapefile" dams_11272018.shp All_Dams_Merge_SnappedandUnsnapped_11272018_2.gdb AllDamsInventoryMerge_11272018_Tosnap_preschema_HUC -sql "SELECT AnalysisID, SNAP2018, Barrier_Name as Name, River, HUC12 from AllDamsInventoryMerge_11272018_Tosnap_preschema_HUC"
 """
+import sys
+
+sys.path.append("/Applications/PyVmMonitor.app/Contents/MacOS/public_api")
+import pyvmmonitor
+
+pyvmmonitor.connect()
 
 
 import os
@@ -23,8 +29,7 @@ SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
-HUC2 = "03"
-# HUC4 = "0602"
+HUC2 = "05"
 
 start = time()
 
@@ -33,14 +38,13 @@ start = time()
 # layer = "AllDamsInventoryMerge_11272018_SnappedandUnsnapped_preschema"
 # dams = gp.read_file(gdb, layer=layer)
 
-all_wf = (
-    gp.read_file("/Users/bcward/projects/data/sarp/Waterfalls_USGS_2017.gdb")
-    .to_crs(CRS)
-    .set_index("OBJECTID", drop=False)
-)
+all_wf = gp.read_file(
+    "/Users/bcward/projects/data/sarp/Waterfalls_USGS_2017.gdb"
+).to_crs(CRS)
 all_wf["joinID"] = all_wf.OBJECTID
 all_wf["HUC2"] = all_wf.HUC_8.str[:2]
 # all_dams["HUC4"] = all_dams.HUC12.str[:4]
+all_wf.set_index("OBJECTID", drop=False, inplace=True)
 
 # Select out only the dams in this HUC
 wf = all_wf.loc[all_wf.HUC2 == HUC2].copy()
@@ -63,10 +67,24 @@ flowlines = deserialize_gdf("{0}/{1}/flowline.feather".format(src_dir, HUC2))[
 
 snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
 print("Snapping waterfalls")
-snapped = wf.apply(snapper, axis=1)
-wf = gp.GeoDataFrame(
-    wf.drop(columns=["geometry"]).join(snapped), geometry="geometry", crs=flowlines.crs
-)
+snapped = gp.GeoDataFrame(wf.geometry.apply(snapper), crs=flowlines.crs)
+
+# snapped = snap_to_line(wf, flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
+
+# snapped = pd.DataFrame(
+#     snapped,
+#     columns=["geometry", "snap_dist", "nearby", "is_endpoint"]
+#     + list(set(flowlines.columns).difference({"geometry"})),
+# )
+
+# print(snapped.columns)
+# print(snapped)
+# # print(len(snapped))
+# snapped = snapped.loc[~snapped.geometry.isnull()].copy()
+# print(snapped)
+# print(len(snapped))
+
+wf = wf.drop(columns=["geometry"]).join(snapped)
 
 print("writing shapefile")
 

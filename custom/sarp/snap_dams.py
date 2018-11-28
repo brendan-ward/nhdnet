@@ -24,7 +24,7 @@ SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
-HUC2 = "03"
+HUC2 = "13"
 # HUC4 = "0602"
 
 start = time()
@@ -61,7 +61,7 @@ flowlines = deserialize_gdf("{0}/{1}/flowline.feather".format(src_dir, HUC2))[
 
 snapper = snap_to_line(flowlines, SNAP_TOLERANCE_DAMS, prefer_endpoint=False)
 print("Snapping dams")
-snapped = dams.apply(snapper, axis=1)
+snapped = dams.geometry.apply(snapper)
 dams = gp.GeoDataFrame(
     dams[["AnalysisID", "SNAP2018", "Name", "River"]].join(snapped),
     geometry="geometry",

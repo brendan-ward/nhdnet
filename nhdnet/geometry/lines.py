@@ -1,3 +1,4 @@
+import pandas as pd
 import geopandas as gp
 import numpy as np
 from shapely.geometry import Point, LineString, MultiLineString
@@ -103,9 +104,10 @@ def snap_to_line(lines, tolerance=100, prefer_endpoint=False):
     """
 
     line_columns = list(set(lines.columns).difference({"geometry"}))
+    columns = ["geometry", "snap_dist", "nearby", "is_endpoint"] + line_columns
 
-    def snap(record):
-        point = record.geometry
+    def snap(point):
+        # point = record.geometry
         x, y = point.coords[0][:2]
 
         # Search window
@@ -141,14 +143,16 @@ def snap_to_line(lines, tolerance=100, prefer_endpoint=False):
             if snapped is None:
                 snapped = line.interpolate(line.project(point))
 
-            columns = ["geometry", "snap_dist", "nearby", "is_endpoint"]
-            values = [snapped, dist, len(within_tolerance), is_endpoint]
+            values = [snapped, dist, len(within_tolerance), int(is_endpoint)]
 
             # Copy attributes from line to point
-            columns.extend(line_columns)
             values.extend([closest[c] for c in line_columns])
 
             return gp.GeoSeries(values, index=columns)
+
+        # create empty record
+        # return pd.Series(([None] * 4) + [None for c in line_columns], index=columns)
+        return pd.Series([None] * len(columns), index=columns)
 
     print("creating spatial index on lines")
     sindex = lines.sindex
