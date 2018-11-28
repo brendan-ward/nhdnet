@@ -1,9 +1,17 @@
 # from pandas import read_feather # The pandas version has a feather versioning issue
 import os
 import json
+import numpy as np
+from pandas import DataFrame
 from feather import read_dataframe
 from geopandas import GeoDataFrame
+from geopandas.io.file import infer_schema
 from shapely.wkb import loads
+from shapely.geometry import mapping
+import fiona
+
+# import ogr
+import fiona
 
 
 def serialize_df(df, path, index=True):
@@ -117,3 +125,48 @@ def deserialize_gdf(path):
     df = read_dataframe(path)
     df["geometry"] = df.wkb.apply(lambda wkb: loads(wkb))
     return GeoDataFrame(df.drop(columns=["wkb"]), geometry="geometry", crs=crs)
+
+
+# def to_shp(df, path):
+#     drv = ogr.GetDriverByName("ESRI Shapefile")
+#     ds = drv.CreateDataSource(path)
+#     # TODO: type
+#     lyr = ds.CreateLayer(
+#         os.path.splitext(os.path.split(path)[1])[0], None, ogr.wkbLineString
+#     )
+#     for idx, row in df.iterrows():
+#         feat = ogr.Feature(lyr.GetLayerDefn())
+#         feat.SetGeometry(ogr.CreateGeometryFromWkb(row.geometry.to_wkb()))
+#         lyr.CreateFeature(feat)
+# feat.SetField( "Name", name )
+# pt = ogr.Geometry(ogr.wkbPoint)
+# pt.SetPoint_2D(0, x, y)
+# feat.SetGeometry(pt)
+
+
+def to_shp(df, path):
+    geom_col = df._geometry_column_name
+    prop_cols = [c for c in df.columns if c != geom_col]
+    # Drop any records with missing geometries
+    df = df.loc[~df[geom_col].isnull()].copy()
+    print("Converting geometry to geo interface")
+    geometry = df[geom_col].apply(mapping)
+    # fill missing data with None and convert to dict
+    print("Converting props to dictionaries")
+    props = df.drop(columns=[df._geometry_column_name])
+    props.replace({c: {np.nan: None} for c in prop_cols}, inplace=True)
+    props = props.apply(lambda row: row.to_dict(), axis=1)
+    # Convert features to JSON
+    features = DataFrame(
+        {"id": df.index.astype(str), "geometry": geometry, "properties": props}
+    )
+    features["type"] = "Feature"
+    features = features.apply(lambda row: row.to_dict(), axis=1)
+    print("writing features to shapefile")
+    schema = infer_schema(df)
+    with fiona.Env():
+        with fiona.open(
+            path, "w", driver="ESRI Shapefile", crs=df.crs, schema=schema
+        ) as writer:
+            writer.writerecords(features)
+

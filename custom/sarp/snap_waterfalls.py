@@ -5,13 +5,6 @@ ogr2ogr -t_srs "EPSG:102003" -f "ESRI Shapefile" dams_11272018.shp All_Dams_Merg
 
 ogr2ogr -t_srs "EPSG:102003" -f "ESRI Shapefile" dams_11272018.shp All_Dams_Merge_SnappedandUnsnapped_11272018_2.gdb AllDamsInventoryMerge_11272018_Tosnap_preschema_HUC -sql "SELECT AnalysisID, SNAP2018, Barrier_Name as Name, River, HUC12 from AllDamsInventoryMerge_11272018_Tosnap_preschema_HUC"
 """
-import sys
-
-sys.path.append("/Applications/PyVmMonitor.app/Contents/MacOS/public_api")
-import pyvmmonitor
-
-pyvmmonitor.connect()
-
 
 import os
 from time import time
