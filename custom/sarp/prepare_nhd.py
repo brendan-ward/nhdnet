@@ -13,10 +13,25 @@ src_dir = "/Users/bcward/projects/data/sarp/nhd"
 # "0601", "0602", "0603", "0604"
 
 # for HUC4 in ("0301", "0302", "0304", "0305", "0306", "0307", "0308"):
-for i in range(16, 17):
+# region
+units = {
+    "02": [7, 8],
+    "03": list(range(1, 17)),
+    "05": [5, 7, 9, 10, 11, 13, 14],
+    "06": list(range(1, 5)),
+    "07": [10, 11, 14],
+    "10": [24, 28, 29, 30],
+    "11": [1, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
+    "12": list(range(1, 12)),
+    "13": [3, 4, 5, 7, 8, 9],
+}
+
+HUC2 = "02"
+
+for i in units[HUC2]:
     start = time()
 
-    HUC4 = "03{0:02d}".format(i)
+    HUC4 = "{0}{1:02d}".format(HUC2, i)
     print("Processing {}".format(HUC4))
     out_dir = "{0}/{1}".format(src_dir, HUC4)
 
