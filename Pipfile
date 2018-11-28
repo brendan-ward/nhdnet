@@ -9,6 +9,7 @@ geopandas = "*"
 rtree = "*"
 nhdnet = {editable = true, path = "."}
 feather-format = "*"
+fuzzywuzzy = {version = "*", extras = ["speedup"]}
 
 [dev-packages]
 
