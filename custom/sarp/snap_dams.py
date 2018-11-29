@@ -16,7 +16,7 @@ from fuzzywuzzy import fuzz
 
 from nhdnet.geometry.points import create_points
 from nhdnet.geometry.lines import snap_to_line
-from nhdnet.io import deserialize_gdf
+from nhdnet.io import deserialize_gdf, to_shp
 
 CRS = "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
 SNAP_TOLERANCE_DAMS = 200  # meters  FIXME: should be 100m
@@ -24,7 +24,7 @@ SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
-HUC2 = "13"
+HUC2 = "03"
 # HUC4 = "0602"
 
 start = time()
@@ -39,10 +39,10 @@ all_dams = gp.read_file("/Users/bcward/projects/data/sarp/dams_11272018.shp").se
 )
 all_dams["joinID"] = all_dams.AnalysisID
 all_dams["HUC2"] = all_dams.HUC12.str[:2]
-# all_dams["HUC4"] = all_dams.HUC12.str[:4]
 
 # Select out only the dams in this HUC
 dams = all_dams.loc[all_dams.HUC2 == HUC2].copy()
+
 print("selected {0} dams in this unit".format(len(dams)))
 
 print("Reading flowlines")
@@ -84,9 +84,17 @@ dams = dams.join(names[["fuzzmatch", "confidence"]])
 dams.fuzzmatch = dams.fuzzmatch.fillna(0)
 dams.confidence = dams.confidence.fillna("low")
 
+print(
+    "{} dams were not snapped and have now been dropped".format(
+        len(dams.loc[dams.geometry.isnull()])
+    )
+)
+
+print("Snapping done in {:.2f}".format(time() - start))
+
 print("writing shapefile")
 
 # export to SHP for manual review and snapping
-dams.to_file("{0}/{1}/dams_{1}_qa.shp".format(src_dir, HUC2), driver="ESRI Shapefile")
+to_shp(dams, "{0}/{1}/dams_{1}_qa.shp".format(src_dir, HUC2))
 
 print("Done in {:.2f}".format(time() - start))

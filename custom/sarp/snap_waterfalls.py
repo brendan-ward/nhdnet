@@ -15,14 +15,14 @@ from fuzzywuzzy import fuzz
 
 from nhdnet.geometry.points import create_points
 from nhdnet.geometry.lines import snap_to_line
-from nhdnet.io import deserialize_gdf
+from nhdnet.io import deserialize_gdf, to_shp
 
 CRS = "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
 SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
-HUC2 = "05"
+HUC2 = "03"
 
 start = time()
 
@@ -41,6 +41,7 @@ all_wf.set_index("OBJECTID", drop=False, inplace=True)
 
 # Select out only the dams in this HUC
 wf = all_wf.loc[all_wf.HUC2 == HUC2].copy()
+
 print("selected {0} waterfalls in this unit".format(len(wf)))
 
 print("Reading flowlines")
@@ -62,28 +63,19 @@ snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
 print("Snapping waterfalls")
 snapped = gp.GeoDataFrame(wf.geometry.apply(snapper), crs=flowlines.crs)
 
-# snapped = snap_to_line(wf, flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
-
-# snapped = pd.DataFrame(
-#     snapped,
-#     columns=["geometry", "snap_dist", "nearby", "is_endpoint"]
-#     + list(set(flowlines.columns).difference({"geometry"})),
-# )
-
-# print(snapped.columns)
-# print(snapped)
-# # print(len(snapped))
-# snapped = snapped.loc[~snapped.geometry.isnull()].copy()
-# print(snapped)
-# print(len(snapped))
-
 wf = wf.drop(columns=["geometry"]).join(snapped)
+
+print(
+    "{} waterfalls were not snapped and have now been dropped".format(
+        len(wf.loc[wf.geometry.isnull()])
+    )
+)
+
+print("Snapping done in {:.2f}".format(time() - start))
 
 print("writing shapefile")
 
 # export to SHP for manual review and snapping
-wf.to_file(
-    "{0}/{1}/waterfalls_{1}_qa.shp".format(src_dir, HUC2), driver="ESRI Shapefile"
-)
+to_shp(wf, "{0}/{1}/waterfalls_{1}_qa.shp".format(src_dir, HUC2))
 
 print("Done in {:.2f}".format(time() - start))

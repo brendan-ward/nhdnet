@@ -19,7 +19,6 @@ from nhdnet.nhd.cut import cut_flowlines
 from nhdnet.nhd.network import generate_network, calculate_network_stats
 
 
-SNAP_TOLERANCE_DAMS = 200  # meters  FIXME: should be 100m
 SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 HUC4 = "0602"
@@ -52,7 +51,7 @@ dams["joinID"] = dams.UniqueID
 # Select out only the dams in this HUC
 dams = dams.loc[dams.HUC4 == HUC4].copy()
 
-snapper = snap_to_line(flowlines, SNAP_TOLERANCE_DAMS, prefer_endpoint=False)
+snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
 snapped = dams.apply(snapper, axis=1)
 dams = dams.drop(columns=["geometry"]).join(snapped)
 # dams.to_csv("snapped_dams.csv", index=False)

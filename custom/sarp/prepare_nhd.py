@@ -2,7 +2,7 @@ import os
 from time import time
 
 from nhdnet.nhd.extract import extract_flowlines
-from nhdnet.io import serialize_gdf, serialize_df
+from nhdnet.io import serialize_gdf, serialize_df, to_shp
 
 # Use USGS CONUS Albers (EPSG:102003): https://epsg.io/102003    (same as other SARP datasets)
 # use Proj4 syntax, since GeoPandas doesn't properly recognize it's EPSG Code.
@@ -16,7 +16,7 @@ src_dir = "/Users/bcward/projects/data/sarp/nhd"
 # region
 units = {
     "02": [7, 8],
-    "03": list(range(1, 17)),
+    "03": list(range(1, 19)),
     "05": [5, 7, 9, 10, 11, 13, 14],
     "06": list(range(1, 5)),
     "07": [10, 11, 14],
@@ -26,7 +26,7 @@ units = {
     "13": [3, 4, 5, 7, 8, 9],
 }
 
-HUC2 = "02"
+HUC2 = "03"
 
 for i in units[HUC2]:
     start = time()
@@ -65,9 +65,7 @@ for i in units[HUC2]:
     # If a shapefile is needed
     # geo_df = flowlines.copy()
     # geo_df.NHDPlusID = geo_df.NHDPlusID.astype("float64")
-    # geo_df[["geometry", "NHDPlusID", "lineID"]].to_file(
-    #     "{}/flowline.shp".format(out_dir), driver="ESRI Shapefile"
-    # )
+    # to_shp(geo_df, "{}/flowline.shp".format(out_dir))
 
     print("Serializing Done in {:.2f}".format(time() - shp_start))
 

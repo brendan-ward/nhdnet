@@ -1,13 +1,13 @@
 import os
 from time import time
-from nhdnet.io import serialize_gdf, deserialize_gdf
+from nhdnet.io import serialize_gdf, deserialize_gdf, to_shp
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
 
 units = {
     "02": [7, 8],
-    "03": list(range(1, 17)),
+    "03": list(range(1, 19)),
     "05": [5, 7, 9, 10, 11, 13, 14],
     "06": list(range(1, 5)),
     "07": [10, 11, 14],
@@ -17,11 +17,9 @@ units = {
     "13": [3, 4, 5, 7, 8, 9],
 }
 
-HUC2 = "13"
-
+HUC2 = "03"
 
 start = time()
-
 
 merged = None
 for i in units[HUC2]:
@@ -46,7 +44,8 @@ print("serializing to feather")
 serialize_gdf(merged, "{}/flowline.feather".format(region_dir))
 
 print("serializing to shp")
-merged.to_file("{}/flowline.shp".format(region_dir), driver="ESRI Shapefile")
-
+serialize_start = time()
+to_shp(merged, "{}/flowline.shp".format(region_dir))
+print("serialize done in {:.2f}".format(time() - serialize_start))
 
 print("Done in {:.2f}".format(time() - start))
