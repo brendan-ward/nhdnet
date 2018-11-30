@@ -132,7 +132,7 @@ else:
     print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
 
 ##################### Cut flowlines #################
-if RESUME and os.path.exists("split_flowines_FOO.feather"):  # FIXME
+if RESUME and os.path.exists("split_flowines.feather"):
     print("reading cut segments and joins")
     joins = deserialize_df("updated_joins.feather")
     barrier_joins = deserialize_df("barrier_joins.feather").set_index("joinID")
