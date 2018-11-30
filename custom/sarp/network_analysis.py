@@ -3,8 +3,6 @@
 Run this after preparing NHD data for the HUC4 identified below.
 
 """
-
-
 import os
 from time import time
 
@@ -17,13 +15,20 @@ from nhdnet.geometry.lines import snap_to_line
 
 from nhdnet.nhd.cut import cut_flowlines
 from nhdnet.nhd.network import generate_network, calculate_network_stats
+from nhdnet.io import (
+    deserialize_df,
+    deserialize_gdf,
+    to_shp,
+    serialize_df,
+    serialize_gdf,
+)
 
 
 SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
-HUC4 = "0602"
+HUC2 = "06"
 src_dir = "/Users/bcward/projects/data/sarp"
-working_dir = "{0}/nhd/{1}".format(src_dir, HUC4)
+working_dir = "{0}/nhd/{1}".format(src_dir, HUC2)
 os.chdir(working_dir)
 
 start = time()
@@ -31,10 +36,8 @@ start = time()
 ##################### Read NHD data #################
 print("------------------- Reading Flowlines -----------")
 print("reading flowlines")
-flowlines = gp.read_file("flowline.shp")
-flowlines.NHDPlusID = flowlines.NHDPlusID.astype("uint64")
-flowlines.lineID = flowlines.lineID.astype("uint32")
-flowlines.set_index("lineID", inplace=True, drop=False)
+flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
+print("read {} flowlines".format(len(flowlines)))
 
 ##################### Read dams and waterfalls, and merge #################
 barrier_start = time()
@@ -42,18 +45,22 @@ print("------------------- Preparing barriers ----------")
 
 ##################### Read dams #################
 print("Reading dams")
-dams = pd.read_csv("{}/dams.csv".format(src_dir), dtype={"HUC4": str})
-dams = create_points(dams, "lon", "lat", crs={"init": "EPSG:4326"}).to_crs(
-    flowlines.crs
-)
-dams["joinID"] = dams.UniqueID
+dams = deserialize_gdf("{0}/nhd/{1}/dams_post_qa.feather".format(src_dir, HUC2[:2]))[
+    ["AnalysisID", "geometry"]
+]
+dams["joinID"] = dams.AnalysisID
 
-# Select out only the dams in this HUC
-dams = dams.loc[dams.HUC4 == HUC4].copy()
+print("Selected {0} dams in region {1}".format(len(dams), HUC2))
 
+# Snap to lines, assign NHDPlusID and lineID to the point, and drop any that didn't get snapped
 snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
-snapped = dams.apply(snapper, axis=1)
+print("Snapping dams")
+snapped = gp.GeoDataFrame(dams.geometry.apply(snapper), crs=flowlines.crs)
 dams = dams.drop(columns=["geometry"]).join(snapped)
+dams = dams.loc[~dams.geometry.isnull()].copy()
+print("{} dams were successfully snapped".format(len(dams)))
+
+serialize_gdf(dams, "/tmp/dams.feather", index=False)
 # dams.to_csv("snapped_dams.csv", index=False)
 # dams.to_file("snapped_dams.shp", driver="ESRI Shapefile")
 
@@ -61,16 +68,24 @@ dams = dams.drop(columns=["geometry"]).join(snapped)
 print("Reading waterfalls")
 wf = gp.read_file(
     "{}/Waterfalls_USGS_2017.gdb".format(src_dir), layer="Waterfalls_USGS_2018"
-).to_crs(flowlines.crs)
-wf["joinID"] = wf.OBJECTID
+).to_crs(flowlines.crs)[["OBJECTID", "HUC_8", "geometry"]]
+wf["joinID"] = wf.OBJECTID.astype("str")
+wf["AnalysisID"] = ""
 
 # Extract out waterfalls in this HUC
-wf["HUC4"] = wf.HUC_8.str[:4]
-wf = wf.loc[wf.HUC4 == HUC4].copy()
+wf["HUC2"] = wf.HUC_8.str[:2]
+wf = wf.loc[wf.HUC2 == HUC2].copy()
+print("Selected {0} waterfalls in region {1}".format(len(wf), HUC2))
 
+# Snap to lines, assign NHDPlusID and lineID to the point, and drop any that didn't get snapped
 snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
-snapped = wf.apply(snapper, axis=1)
+print("Snapping waterfalls")
+snapped = gp.GeoDataFrame(wf.geometry.apply(snapper), crs=flowlines.crs)
 wf = wf.drop(columns=["geometry"]).join(snapped)
+wf = wf.loc[~wf.geometry.isnull()].copy()
+print("{} waterfalls were successfully snapped".format(len(wf)))
+
+serialize_gdf(wf, "/tmp/wf.feather", index=False)
 # wf.to_csv("snapped_waterfalls.csv", index=False)
 # wf.to_file("snapped_waterfalls.shp", driver="ESRI Shapefile")
 
@@ -83,6 +98,7 @@ columns = [
     "lineID",
     "NHDPlusID",
     "joinID",
+    "AnalysisID",
     "kind",
     "geometry",
     "snap_dist",
@@ -93,27 +109,18 @@ columns = [
 barriers = dams[columns].append(wf[columns], ignore_index=True, sort=False)
 barriers.set_index("joinID", inplace=True, drop=False)
 
-# drop any not on the network from all later processing
-barriers = barriers.loc[~barriers.NHDPlusID.isnull()]
-barriers.lineID = barriers.lineID.astype("uint32")
-
+print("Checking for duplicates")
 wkt = barriers[["joinID", "geometry"]].copy()
 wkt["point"] = wkt.geometry.apply(lambda g: g.to_wkt())
-wkt_counts = (
-    wkt.groupby("point")
-    .size()
-    .reset_index()
-    .set_index("point")
-    .rename(columns={0: "num"})
-)
-wkt = wkt.join(wkt_counts, on="point")
-duplicates = wkt.loc[wkt.num > 1].joinID
-print("Removing {} duplicate locations".format(len(duplicates)))
-barriers = barriers.loc[~barriers.joinID.isin(duplicates)].copy()
+barriers = barriers.loc[wkt.drop_duplicates("point").index]
+print("Removed {} duplicate locations".format(len(wkt) - len(barriers)))
 
+print("serializing barriers")
 # barriers in original but not here are dropped due to likely duplication
-barriers.to_csv("barriers.csv", index=False)
-barriers.to_file("barriers.shp", driver="ESRI Shapefile")
+serialize_gdf(barriers, "barriers.feather", index=False)
+tmp = barriers.copy()
+tmp.NHDPlusID = tmp.NHDPlusID.astype("float64")
+to_shp(tmp, "barriers.shp")
 
 
 print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
@@ -123,15 +130,19 @@ cut_start = time()
 print("------------------- Cutting flowlines -----------")
 print("Starting from {} original segments".format(len(flowlines)))
 
-joins = pd.read_csv(
-    "flowline_joins.csv", dtype={"upstream_id": "uint32", "downstream_id": "uint32"}
-)
+joins = deserialize_df("flowline_joins.feather")
 
 flowlines, joins, barrier_joins = cut_flowlines(flowlines, barriers, joins)
 
 barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
 barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
 
+print("Done cutting in {:.2f}".format(time() - cut_start))
+
+print("serializing cut geoms")
+serialize_df(joins, "updated_joins.feather", index=False)
+serialize_df(barrier_joins, "barrier_joins.feather", index=False)
+serialize_gdf(flowlines, "split_flowlines.feather", index=False)
 
 # joins.to_csv("updated_joins.csv", index=False)
 # barrier_joins.to_csv("barrier_joins.csv", index=False)
@@ -140,7 +151,7 @@ barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
 # flowlines.NHDPlusID = flowlines.NHDPlusID.astype("float64")
 # flowlines.to_file("split_flowlines.shp", driver="ESRI Shapefile")
 
-print("Done cutting in {:.2f}".format(time() - cut_start))
+print("Done serializing cuts in {:.2f}".format(time() - cut_start))
 
 ##################### Create networks #################
 print("------------------- Creating networks -----------")
@@ -207,8 +218,10 @@ for start_id in barrier_segments:
 # Note: network_df is still indexed on lineID
 network_df = flowlines.loc[~flowlines.networkID.isnull()].copy()
 network_df.networkID = network_df.networkID.astype("uint32")
-network_df.drop(columns=["geometry"]).to_csv("network_segments.csv", index=False)
-network_df.to_file("network_segments.shp", driver="ESRI Shapefile")
+
+serialize_gdf(network_df, "network_segments.feather", index=False)
+# network_df.drop(columns=["geometry"]).to_csv("network_segments.csv", index=False)
+# network_df.to_file("network_segments.shp", driver="ESRI Shapefile")
 
 print(
     "Created {0} networks in {1:.2f}s".format(
@@ -291,7 +304,9 @@ for id in network_ids:
 # networks.drop(columns=["geometry"]).to_csv("network.csv", index=False)
 
 print("Writing dissolved network shapefile")
-networks.to_file("network.shp", driver="ESRI Shapefile")
+serialize_gdf(networks, "network.feather", index=False)
+
+to_shp(networks, "network.shp")
 
 
 print("All done in {:.2f}".format(time() - start))
