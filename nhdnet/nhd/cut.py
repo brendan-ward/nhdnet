@@ -156,25 +156,50 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
         .append(
             new_flowlines.drop(columns=["origLineID"]), sort=False, ignore_index=True
         )
-        .set_index("lineID", drop=False)
     )
+    # reset types
+    flowlines.lineID = flowlines.lineID.astype("uint32")
+    flowlines.set_index("lineID", drop=False, inplace=True)
+
     print("Final number of segments", len(flowlines))
 
-    updated_joins = joins.append(pd.DataFrame(new_joins), ignore_index=True, sort=False)
+    joins = joins.append(pd.DataFrame(new_joins), ignore_index=True, sort=False)
+
+    import json
+
+    with open("/tmp/downstreams.json", "w") as out:
+        out.write(json.dumps(updated_downstreams))
+    with open("/tmp/upstreams.json", "w") as out:
+        out.write(json.dumps(updated_upstreams))
 
     # update joins that had new segments inserted between them
-    index = updated_joins.upstream_id.isin(updated_upstreams.keys())
-    updated_joins.loc[index, "upstream_id"] = updated_joins.loc[index].upstream_id.map(
+    index = joins.upstream_id.isin(updated_upstreams.keys())
+    joins.loc[index, "upstream_id"] = joins.loc[index].upstream_id.map(
         updated_upstreams
     )
 
-    index = updated_joins.downstream_id.isin(updated_downstreams.keys())
-    updated_joins.loc[index, "downstream_id"] = updated_joins.loc[
-        index
-    ].downstream_id.map(updated_downstreams)
+    index = joins.downstream_id.isin(updated_downstreams.keys())
+    joins.loc[index, "downstream_id"] = joins.loc[index].downstream_id.map(
+        updated_downstreams
+    )
+
+    joins.upstream_id = joins.upstream_id.astype("uint32")
+    joins.downstream_id = joins.downstream_id.astype("uint32")
 
     barrier_joins = pd.DataFrame(
         barrier_joins, columns=["NHDPlusID", "joinID", "upstream_id", "downstream_id"]
     )
 
-    return flowlines, updated_joins, barrier_joins
+    # Update barrier joins based on upstreams or downstreams that were updated with
+    # new segment ids
+    index = barrier_joins.upstream_id.isin(updated_upstreams.keys())
+    barrier_joins.loc[index, "upstream_id"] = barrier_joins.loc[index].upstream_id.map(
+        updated_upstreams
+    )
+
+    index = barrier_joins.downstream_id.isin(updated_downstreams.keys())
+    barrier_joins.loc[index, "downstream_id"] = barrier_joins.loc[
+        index
+    ].downstream_id.map(updated_downstreams)
+
+    return flowlines, joins, barrier_joins

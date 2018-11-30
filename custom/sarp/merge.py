@@ -29,7 +29,6 @@ units = {
     "13": [3, 4, 5, 7, 8, 9],
 }
 
-
 start = time()
 
 merged = None
@@ -43,6 +42,7 @@ for i in units[HUC2]:
 
     # Merge flowlines
     flowlines = deserialize_gdf("{}/flowline.feather".format(huc_dir))
+    print("Read {} flowlines".format(len(flowlines)))
     flowlines["HUC4"] = HUC4
     flowlines["lineID"] += huc_id
 
@@ -74,7 +74,6 @@ for idx, row in huc_in.iterrows():
     match = merged_joins.loc[merged_joins.downstream == row.upstream].downstream_id
     if len(match):
         merged_joins.loc[idx, "upstream_id"] = match.iloc[0]
-    print(merged_joins.loc[idx])
 
 # remove duplicate terminals
 merged_joins = merged_joins.loc[
@@ -82,13 +81,13 @@ merged_joins = merged_joins.loc[
 ].copy()
 
 
-print("serializing to feather")
+print("serializing {} flowlines to feather".format(len(merged)))
 serialize_gdf(merged, "{}/flowline.feather".format(region_dir))
 serialize_df(merged_joins, "{}/flowline_joins.feather".format(region_dir), index=False)
 
-# print("serializing to shp")
-# serialize_start = time()
-# to_shp(merged, "{}/flowline.shp".format(region_dir))
-# print("serialize done in {:.2f}".format(time() - serialize_start))
+print("serializing to shp")
+serialize_start = time()
+to_shp(merged, "{}/flowline.shp".format(region_dir))
+print("serialize done in {:.2f}".format(time() - serialize_start))
 
 print("Done in {:.2f}".format(time() - start))

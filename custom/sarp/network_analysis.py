@@ -24,6 +24,8 @@ from nhdnet.io import (
 )
 
 
+RESUME = True
+
 SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 HUC2 = "06"
@@ -40,7 +42,7 @@ flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
 print("read {} flowlines".format(len(flowlines)))
 
 print("------------------- Preparing barriers ----------")
-if os.path.exists("barriers.feather"):
+if RESUME and os.path.exists("barriers.feather"):
     print("Reading barriers")
     barriers = deserialize_gdf("barriers.feather").set_index("joinID", drop=False)
 
@@ -130,29 +132,37 @@ else:
     print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
 
 ##################### Cut flowlines #################
-cut_start = time()
-print("------------------- Cutting flowlines -----------")
-print("Starting from {} original segments".format(len(flowlines)))
+if RESUME and os.path.exists("split_flowines_FOO.feather"):  # FIXME
+    print("reading cut segments and joins")
+    joins = deserialize_df("updated_joins.feather")
+    barrier_joins = deserialize_df("barrier_joins.feather").set_index("joinID")
+    flowlines = deserialize_gdf("split_flowlines.feather").set_index("lineID")
 
-joins = deserialize_df("flowline_joins.feather")
-# since all other lineIDs use HUC4s, this should be unique
-next_segment_id = int(HUC2) * 1000000 + 1
-flowlines, joins, barrier_joins = cut_flowlines(
-    flowlines, barriers, joins, next_segment_id=next_segment_id
-)
+else:
+    cut_start = time()
+    print("------------------- Cutting flowlines -----------")
+    print("Starting from {} original segments".format(len(flowlines)))
 
-barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
-barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
+    joins = deserialize_df("flowline_joins.feather")
+    # since all other lineIDs use HUC4 prefixes, this should be unique
+    next_segment_id = int(HUC2) * 1000000 + 1
+    flowlines, joins, barrier_joins = cut_flowlines(
+        flowlines, barriers, joins, next_segment_id=next_segment_id
+    )
 
-print("Done cutting in {:.2f}".format(time() - cut_start))
+    barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
+    barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
 
-print("serializing cut geoms")
-serialize_df(joins, "updated_joins.feather", index=False)
-serialize_df(barrier_joins, "barrier_joins.feather", index=False)
-serialize_gdf(flowlines, "split_flowlines.feather", index=False)
-# to_shp(flowlines, "split_flowlines.shp")
+    print("Done cutting in {:.2f}".format(time() - cut_start))
 
-print("Done serializing cuts in {:.2f}".format(time() - cut_start))
+    print("serializing cut geoms")
+    serialize_df(joins, "updated_joins.feather", index=False)
+    serialize_df(barrier_joins, "barrier_joins.feather", index=False)
+    serialize_gdf(flowlines, "split_flowlines.feather", index=False)
+    # to_shp(flowlines, "split_flowlines.shp")
+
+    print("Done serializing cuts in {:.2f}".format(time() - cut_start))
+
 
 ##################### Create networks #################
 print("------------------- Creating networks -----------")
@@ -162,15 +172,24 @@ barrier_segments = list(set(barrier_joins.upstream_id.unique()).difference({0}))
 
 print("generating upstream / downstream indices")
 join_ids = joins[["downstream_id", "upstream_id"]]
-upstreams = (
-    join_ids.groupby("downstream_id")["upstream_id"]
-    .unique()
-    .reset_index()
-    .set_index("downstream_id")
-)
+# upstreams = (
+#     join_ids.groupby("downstream_id")["upstream_id"]
+#     .unique()
+#     .reset_index()
+#     .set_index("downstream_id")
+# )
+upstreams = join_ids.set_index("downstream_id")
 downstreams = join_ids.groupby("upstream_id")["downstream_id"].size()
 
-get_upstream_ids = lambda id: upstreams.loc[id].upstream_id
+# get_upstream_ids = lambda id: upstreams.loc[id].upstream_id
+def get_upstream_ids(id):
+    ids = upstreams.loc[id].upstream_id
+    if isinstance(ids, pd.Series):
+        return ids
+    # in case we got a single result back
+    return [ids]
+
+
 has_multiple_downstreams = lambda id: downstreams.loc[id] > 1
 
 # Create networks from all terminal nodes (no downstream nodes) up to origins or dams (but not including dam segments)
@@ -179,6 +198,8 @@ root_ids = joins.loc[
     (joins.downstream_id == 0) | (~joins.downstream_id.isin(joins.upstream_id.unique()))
 ].upstream_id
 
+
+# TODO: can we refactor the following as a couple apply() statements?  Can build up a dict and then apply using map()
 print(
     "Starting non-barrier functional network creation for {} origin points".format(
         len(root_ids)
@@ -222,9 +243,6 @@ network_df = flowlines.loc[~flowlines.networkID.isnull()].copy()
 network_df.networkID = network_df.networkID.astype("uint32")
 
 serialize_gdf(network_df, "network_segments.feather", index=False)
-# network_df.drop(columns=["geometry"]).to_csv("network_segments.csv", index=False)
-# network_df.to_file("network_segments.shp", driver="ESRI Shapefile")
-
 print(
     "Created {0} networks in {1:.2f}s".format(
         len(network_df.networkID.unique()), time() - network_start
