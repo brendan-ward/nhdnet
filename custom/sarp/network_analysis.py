@@ -135,8 +135,11 @@ print("------------------- Cutting flowlines -----------")
 print("Starting from {} original segments".format(len(flowlines)))
 
 joins = deserialize_df("flowline_joins.feather")
-
-flowlines, joins, barrier_joins = cut_flowlines(flowlines, barriers, joins)
+# since all other lineIDs use HUC4s, this should be unique
+next_segment_id = int(HUC2) * 1000000 + 1
+flowlines, joins, barrier_joins = cut_flowlines(
+    flowlines, barriers, joins, next_segment_id=next_segment_id
+)
 
 barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
 barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
@@ -147,13 +150,7 @@ print("serializing cut geoms")
 serialize_df(joins, "updated_joins.feather", index=False)
 serialize_df(barrier_joins, "barrier_joins.feather", index=False)
 serialize_gdf(flowlines, "split_flowlines.feather", index=False)
-
-# joins.to_csv("updated_joins.csv", index=False)
-# barrier_joins.to_csv("barrier_joins.csv", index=False)
-# flowlines.drop(columns=["geometry"]).to_csv("split_flowlines.csv", index=False)
-# print("Writing split flowlines shp")
-# flowlines.NHDPlusID = flowlines.NHDPlusID.astype("float64")
-# flowlines.to_file("split_flowlines.shp", driver="ESRI Shapefile")
+# to_shp(flowlines, "split_flowlines.shp")
 
 print("Done serializing cuts in {:.2f}".format(time() - cut_start))
 
@@ -181,6 +178,7 @@ has_multiple_downstreams = lambda id: downstreams.loc[id] > 1
 root_ids = joins.loc[
     (joins.downstream_id == 0) | (~joins.downstream_id.isin(joins.upstream_id.unique()))
 ].upstream_id
+
 print(
     "Starting non-barrier functional network creation for {} origin points".format(
         len(root_ids)
