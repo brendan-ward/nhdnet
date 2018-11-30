@@ -157,8 +157,13 @@ def extract_flowlines(gdb_path, target_crs):
         join_df.join(ids.rename(columns={"lineID": "upstream_id"}), on="upstream")
         .join(ids.rename(columns={"lineID": "downstream_id"}), on="downstream")
         .fillna(0)
-        .astype("uint64")
     )
+
+    for col in ("upstream", "downstream"):
+        join_df[col] = join_df[col].astype("uint64")
+
+    for col in ("upstream_id", "downstream_id"):
+        join_df[col] = join_df[col].astype("uint32")
 
     # set join types to make it easier to track
     join_df["type"] = "internal"  # set default

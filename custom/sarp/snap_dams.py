@@ -24,15 +24,10 @@ SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
-HUC2 = "03"
-# HUC4 = "0602"
+HUC2 = "13"
 
 start = time()
 
-
-# gdb = "/Users/bcward/projects/data/sarp/All_Dams_Merge_SnappedandUnsnapped_11272018.gdb"
-# layer = "AllDamsInventoryMerge_11272018_SnappedandUnsnapped_preschema"
-# dams = gp.read_file(gdb, layer=layer)
 
 all_dams = gp.read_file("/Users/bcward/projects/data/sarp/dams_11272018.shp").set_index(
     "AnalysisID", drop=False
@@ -43,7 +38,7 @@ all_dams["HUC2"] = all_dams.HUC12.str[:2]
 # Select out only the dams in this HUC
 dams = all_dams.loc[all_dams.HUC2 == HUC2].copy()
 
-print("selected {0} dams in this unit".format(len(dams)))
+print("selected {0} dams in {1}".format(len(dams), HUC2))
 
 print("Reading flowlines")
 flowlines = deserialize_gdf("{0}/{1}/flowline.feather".format(src_dir, HUC2))[
