@@ -4,31 +4,29 @@ import numpy as np
 
 from nhdnet.geometry.lines import cut_line_at_points, calculate_sinuosity
 
-
 # if points are within this distance of start or end coordinate, nothing is cut
 EPS = 1e-6
 
 
-def cut_flowlines(flowlines, barriers, joins):
+# TODO: can call this in a loop of HUC4s to keep the size down?
+def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     print("Starting number of segments: {}".format(len(flowlines)))
     print("Cutting in {0} barriers".format(len(barriers)))
 
     # Our segment ids are ints, so just increment from the last one we had from NHD
-    next_segment_id = int(flowlines.index.max() + 1)
+    if next_segment_id is None:
+        next_segment_id = int(flowlines.index.max() + 1)
 
-    update_cols = ["length", "sinuosity", "geometry", "lineID"]
-    copy_cols = list(set(flowlines.columns).difference(update_cols))
-    columns = copy_cols + update_cols
+    # origLineID is the original lineID of the segment that was split
+    # can be used to join back to flowlines to get the other props
+    columns = ["length", "sinuosity", "geometry", "lineID", "origLineID"]
 
-    # create container for new geoms
-    new_flowlines = gp.GeoDataFrame(
-        columns=flowlines.columns, crs=flowlines.crs, geometry="geometry"
-    )
+    updated_upstreams = dict()
+    updated_downstreams = dict()
 
-    updated_joins = joins.copy()
-
-    # create join table for barriers
     barrier_joins = []
+    new_segments = []
+    new_joins = []
 
     segments_with_barriers = flowlines.loc[flowlines.index.isin(barriers.lineID)]
     print("{} segments have at least one barrier".format(len(segments_with_barriers)))
@@ -36,8 +34,8 @@ def cut_flowlines(flowlines, barriers, joins):
         # print("-----------------------\n\nlineID", idx)
 
         # Find upstream and downstream segments
-        upstream_ids = joins.loc[joins.downstream_id == idx]
-        downstream_ids = joins.loc[joins.upstream_id == idx]
+        upstreams = joins.loc[joins.downstream_id == idx]
+        downstreams = joins.loc[joins.upstream_id == idx]
 
         # Barriers on this line
         points = barriers.loc[barriers.lineID == idx].copy()
@@ -67,13 +65,11 @@ def cut_flowlines(flowlines, barriers, joins):
 
             # add these to flowlines
             for i, (id, segment) in enumerate(segments):
-                values = [row[c] for c in copy_cols] + [
-                    segment.length,
-                    calculate_sinuosity(segment),
-                    segment,
-                    id,
-                ]
-                new_flowlines.loc[id] = gp.GeoSeries(values, index=columns)
+                values = gp.GeoSeries(
+                    [segment.length, calculate_sinuosity(segment), segment, id, idx],
+                    index=columns,
+                )
+                new_segments.append(values)
 
                 if i < num_segments - 1:
                     # add a join for this barrier
@@ -86,22 +82,25 @@ def cut_flowlines(flowlines, barriers, joins):
                         }
                     )
 
-            # update upstream nodes to set first segment as their new downstream
-            # update downstream nodes to set last segment as their new upstream
-            updated_joins.loc[upstream_ids.index, "downstream_id"] = ids[0]
-            updated_joins.loc[downstream_ids.index, "upstream_id"] = ids[-1]
+            # Since are UPDATING the downstream IDs of the upstream segments, we build a mapping of the original
+            # downstream_id to the updated value for the new segment.
+            # sets downstream_id
+            updated_downstreams.update({id: ids[0] for id in upstreams.downstream_id})
+            # sets upstream_id
+            updated_upstreams.update({id: ids[-1] for id in downstreams.upstream_id})
 
-            # add joins for everything after first node
-            new_joins = [
-                {
-                    "upstream_id": ids[i],
-                    "downstream_id": id,
-                    "upstream": np.nan,
-                    "downstream": np.nan,
-                }
-                for i, id in enumerate(ids[1:])
-            ]
-            updated_joins = updated_joins.append(new_joins, ignore_index=True)
+            # # add joins for everything after first node
+            new_joins.extend(
+                [
+                    {
+                        "upstream_id": ids[i],
+                        "downstream_id": id,
+                        "upstream": np.nan,
+                        "downstream": np.nan,
+                    }
+                    for i, id in enumerate(ids[1:])
+                ]
+            )
 
         # If barriers are at the downstream-most point or upstream-most point
         us_points = points.loc[points.linepos <= EPS]
@@ -114,7 +113,7 @@ def cut_flowlines(flowlines, barriers, joins):
             # Do this for every upstream segment (if there are multiple upstream nodes)
             downstream_id = segments[0][0] if segments else idx
             for _, barrier in us_points.iterrows():
-                for uIdx, upstream in upstream_ids.iterrows():
+                for uIdx, upstream in upstreams.iterrows():
                     barrier_joins.append(
                         {
                             "NHDPlusID": row.NHDPlusID,
@@ -130,7 +129,7 @@ def cut_flowlines(flowlines, barriers, joins):
             # Do this for every downstream segment (if there are multiple downstream nodes)
             upstream_id = segments[-1][0] if segments else idx
             for _, barrier in ds_points.iterrows():
-                for _, downstream in downstream_ids.iterrows():
+                for _, downstream in downstreams.iterrows():
                     barrier_joins.append(
                         {
                             "NHDPlusID": row.NHDPlusID,
@@ -140,12 +139,39 @@ def cut_flowlines(flowlines, barriers, joins):
                         }
                     )
 
-    # Drop all segments replaced by new segments
-    flowlines = flowlines.drop(
-        flowlines.loc[flowlines.NHDPlusID.isin(new_flowlines.NHDPlusID)].index
+    new_flowlines = gp.GeoDataFrame(
+        new_segments, columns=columns, crs=flowlines.crs, geometry="geometry"
     )
-    flowlines = flowlines.append(new_flowlines, sort=False)
+    new_flowlines = new_flowlines.join(
+        flowlines.drop(columns=["length", "sinuosity", "geometry", "lineID"]),
+        on="origLineID",
+    )
+
+    # Drop all segments replaced by new segments
+    # Join to new flowlines after reseting index to make append easier
+    # Then add the index back
+    flowlines = (
+        flowlines.loc[~flowlines.index.isin(new_flowlines.origLineID.unique())]
+        .reset_index(drop=True)
+        .append(
+            new_flowlines.drop(columns=["origLineID"]), sort=False, ignore_index=True
+        )
+        .set_index("lineID", drop=False)
+    )
     print("Final number of segments", len(flowlines))
+
+    updated_joins = joins.append(pd.DataFrame(new_joins), ignore_index=True, sort=False)
+
+    # update joins that had new segments inserted between them
+    index = updated_joins.upstream_id.isin(updated_upstreams.keys())
+    updated_joins.loc[index, "upstream_id"] = updated_joins.loc[index].upstream_id.map(
+        updated_upstreams
+    )
+
+    index = updated_joins.downstream_id.isin(updated_downstreams.keys())
+    updated_joins.loc[index, "downstream_id"] = updated_joins.loc[
+        index
+    ].downstream_id.map(updated_downstreams)
 
     barrier_joins = pd.DataFrame(
         barrier_joins, columns=["NHDPlusID", "joinID", "upstream_id", "downstream_id"]
