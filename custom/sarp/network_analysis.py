@@ -39,91 +39,95 @@ print("reading flowlines")
 flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
 print("read {} flowlines".format(len(flowlines)))
 
-##################### Read dams and waterfalls, and merge #################
-barrier_start = time()
 print("------------------- Preparing barriers ----------")
+if os.path.exists("barriers.feather"):
+    print("Reading barriers")
+    barriers = deserialize_gdf("barriers.feather").set_index("joinID", drop=False)
 
-##################### Read dams #################
-print("Reading dams")
-dams = deserialize_gdf("{0}/nhd/{1}/dams_post_qa.feather".format(src_dir, HUC2[:2]))[
-    ["AnalysisID", "geometry"]
-]
-dams["joinID"] = dams.AnalysisID
+else:
+    ##################### Read dams and waterfalls, and merge #################
+    barrier_start = time()
 
-print("Selected {0} dams in region {1}".format(len(dams), HUC2))
+    ##################### Read dams #################
+    print("Reading dams")
+    dams = deserialize_gdf(
+        "{0}/nhd/{1}/dams_post_qa.feather".format(src_dir, HUC2[:2])
+    )[["AnalysisID", "geometry"]]
+    dams["joinID"] = dams.AnalysisID
 
-# Snap to lines, assign NHDPlusID and lineID to the point, and drop any that didn't get snapped
-snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
-print("Snapping dams")
-snapped = gp.GeoDataFrame(dams.geometry.apply(snapper), crs=flowlines.crs)
-dams = dams.drop(columns=["geometry"]).join(snapped)
-dams = dams.loc[~dams.geometry.isnull()].copy()
-print("{} dams were successfully snapped".format(len(dams)))
+    print("Selected {0} dams in region {1}".format(len(dams), HUC2))
 
-serialize_gdf(dams, "/tmp/dams.feather", index=False)
-# dams.to_csv("snapped_dams.csv", index=False)
-# dams.to_file("snapped_dams.shp", driver="ESRI Shapefile")
+    # Snap to lines, assign NHDPlusID and lineID to the point, and drop any that didn't get snapped
+    snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
+    print("Snapping dams")
+    snapped = gp.GeoDataFrame(dams.geometry.apply(snapper), crs=flowlines.crs)
+    dams = dams.drop(columns=["geometry"]).join(snapped)
+    dams = dams.loc[~dams.geometry.isnull()].copy()
+    print("{} dams were successfully snapped".format(len(dams)))
 
-##################### Read waterfalls #################
-print("Reading waterfalls")
-wf = gp.read_file(
-    "{}/Waterfalls_USGS_2017.gdb".format(src_dir), layer="Waterfalls_USGS_2018"
-).to_crs(flowlines.crs)[["OBJECTID", "HUC_8", "geometry"]]
-wf["joinID"] = wf.OBJECTID.astype("str")
-wf["AnalysisID"] = ""
+    serialize_gdf(dams, "/tmp/dams.feather", index=False)
+    # dams.to_csv("snapped_dams.csv", index=False)
+    # dams.to_file("snapped_dams.shp", driver="ESRI Shapefile")
 
-# Extract out waterfalls in this HUC
-wf["HUC2"] = wf.HUC_8.str[:2]
-wf = wf.loc[wf.HUC2 == HUC2].copy()
-print("Selected {0} waterfalls in region {1}".format(len(wf), HUC2))
+    ##################### Read waterfalls #################
+    print("Reading waterfalls")
+    wf = gp.read_file(
+        "{}/Waterfalls_USGS_2017.gdb".format(src_dir), layer="Waterfalls_USGS_2018"
+    ).to_crs(flowlines.crs)[["OBJECTID", "HUC_8", "geometry"]]
+    wf["joinID"] = wf.OBJECTID.astype("str")
+    wf["AnalysisID"] = ""
 
-# Snap to lines, assign NHDPlusID and lineID to the point, and drop any that didn't get snapped
-snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
-print("Snapping waterfalls")
-snapped = gp.GeoDataFrame(wf.geometry.apply(snapper), crs=flowlines.crs)
-wf = wf.drop(columns=["geometry"]).join(snapped)
-wf = wf.loc[~wf.geometry.isnull()].copy()
-print("{} waterfalls were successfully snapped".format(len(wf)))
+    # Extract out waterfalls in this HUC
+    wf["HUC2"] = wf.HUC_8.str[:2]
+    wf = wf.loc[wf.HUC2 == HUC2].copy()
+    print("Selected {0} waterfalls in region {1}".format(len(wf), HUC2))
 
-serialize_gdf(wf, "/tmp/wf.feather", index=False)
-# wf.to_csv("snapped_waterfalls.csv", index=False)
-# wf.to_file("snapped_waterfalls.shp", driver="ESRI Shapefile")
+    # Snap to lines, assign NHDPlusID and lineID to the point, and drop any that didn't get snapped
+    snapper = snap_to_line(flowlines, SNAP_TOLERANCE, prefer_endpoint=False)
+    print("Snapping waterfalls")
+    snapped = gp.GeoDataFrame(wf.geometry.apply(snapper), crs=flowlines.crs)
+    wf = wf.drop(columns=["geometry"]).join(snapped)
+    wf = wf.loc[~wf.geometry.isnull()].copy()
+    print("{} waterfalls were successfully snapped".format(len(wf)))
 
-##################### Create combined barriers dataset #################
-print("Merging and exporting single barriers file")
-dams["kind"] = "dam"
-wf["kind"] = "waterfall"
+    serialize_gdf(wf, "/tmp/wf.feather", index=False)
+    # wf.to_csv("snapped_waterfalls.csv", index=False)
+    # wf.to_file("snapped_waterfalls.shp", driver="ESRI Shapefile")
 
-columns = [
-    "lineID",
-    "NHDPlusID",
-    "joinID",
-    "AnalysisID",
-    "kind",
-    "geometry",
-    "snap_dist",
-    "nearby",
-    # "is_endpoint",
-]
+    ##################### Create combined barriers dataset #################
+    print("Merging and exporting single barriers file")
+    dams["kind"] = "dam"
+    wf["kind"] = "waterfall"
 
-barriers = dams[columns].append(wf[columns], ignore_index=True, sort=False)
-barriers.set_index("joinID", inplace=True, drop=False)
+    columns = [
+        "lineID",
+        "NHDPlusID",
+        "joinID",
+        "AnalysisID",
+        "kind",
+        "geometry",
+        "snap_dist",
+        "nearby",
+        # "is_endpoint",
+    ]
 
-print("Checking for duplicates")
-wkt = barriers[["joinID", "geometry"]].copy()
-wkt["point"] = wkt.geometry.apply(lambda g: g.to_wkt())
-barriers = barriers.loc[wkt.drop_duplicates("point").index]
-print("Removed {} duplicate locations".format(len(wkt) - len(barriers)))
+    barriers = dams[columns].append(wf[columns], ignore_index=True, sort=False)
+    barriers.set_index("joinID", inplace=True, drop=False)
 
-print("serializing barriers")
-# barriers in original but not here are dropped due to likely duplication
-serialize_gdf(barriers, "barriers.feather", index=False)
-tmp = barriers.copy()
-tmp.NHDPlusID = tmp.NHDPlusID.astype("float64")
-to_shp(tmp, "barriers.shp")
+    print("Checking for duplicates")
+    wkt = barriers[["joinID", "geometry"]].copy()
+    wkt["point"] = wkt.geometry.apply(lambda g: g.to_wkt())
+    barriers = barriers.loc[wkt.drop_duplicates("point").index]
+    print("Removed {} duplicate locations".format(len(wkt) - len(barriers)))
 
+    print("serializing barriers")
+    # barriers in original but not here are dropped due to likely duplication
+    serialize_gdf(barriers, "barriers.feather", index=False)
+    tmp = barriers.copy()
+    tmp.NHDPlusID = tmp.NHDPlusID.astype("float64")
+    to_shp(tmp, "barriers.shp")
 
-print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
+    print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
 
 ##################### Cut flowlines #################
 cut_start = time()
