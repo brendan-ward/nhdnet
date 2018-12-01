@@ -163,14 +163,8 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
 
     print("Final number of segments", len(flowlines))
 
+    # Append in new joins
     joins = joins.append(pd.DataFrame(new_joins), ignore_index=True, sort=False)
-
-    import json
-
-    with open("/tmp/downstreams.json", "w") as out:
-        out.write(json.dumps(updated_downstreams))
-    with open("/tmp/upstreams.json", "w") as out:
-        out.write(json.dumps(updated_upstreams))
 
     # update joins that had new segments inserted between them
     index = joins.upstream_id.isin(updated_upstreams.keys())

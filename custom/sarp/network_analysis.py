@@ -8,6 +8,7 @@ from time import time
 
 import geopandas as gp
 import pandas as pd
+import numpy as np
 from shapely.geometry import MultiLineString
 
 from nhdnet.geometry.points import create_points
@@ -73,14 +74,16 @@ else:
 
     ##################### Read waterfalls #################
     print("Reading waterfalls")
-    wf = gp.read_file(
-        "{}/Waterfalls_USGS_2017.gdb".format(src_dir), layer="Waterfalls_USGS_2018"
-    ).to_crs(flowlines.crs)[["OBJECTID", "HUC_8", "geometry"]]
-    wf["joinID"] = wf.OBJECTID.astype("str")
+    # wf = gp.read_file(
+    #     "{}/Waterfalls_USGS_2017.gdb".format(src_dir), layer="Waterfalls_USGS_2018"
+    # ).to_crs(flowlines.crs)[["OBJECTID", "HUC_8", "geometry"]]
+    wf = gp.read_file("{}/sarp_falls_huc2.shp".format(src_dir)).to_crs(flowlines.crs)[
+        ["fall_id", "name", "HUC2", "geometry"]
+    ]
+    wf["joinID"] = wf.fall_id.astype("int").astype("str")
     wf["AnalysisID"] = ""
 
     # Extract out waterfalls in this HUC
-    wf["HUC2"] = wf.HUC_8.str[:2]
     wf = wf.loc[wf.HUC2 == HUC2].copy()
     print("Selected {0} waterfalls in region {1}".format(len(wf), HUC2))
 
@@ -132,11 +135,11 @@ else:
     print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
 
 ##################### Cut flowlines #################
-if RESUME and os.path.exists("split_flowines.feather"):
+if RESUME and os.path.exists("split_flowlines.feather"):
     print("reading cut segments and joins")
     joins = deserialize_df("updated_joins.feather")
-    barrier_joins = deserialize_df("barrier_joins.feather").set_index("joinID")
-    flowlines = deserialize_gdf("split_flowlines.feather").set_index("lineID")
+    barrier_joins = deserialize_df("barrier_joins.feather").set_index('joinID', drop=False)
+    flowlines = deserialize_gdf("split_flowlines.feather").set_index("lineID", drop=False)
 
 else:
     cut_start = time()
@@ -152,6 +155,7 @@ else:
 
     barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
     barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
+    barrier_joins.set_index('joinID', drop=False)
 
     print("Done cutting in {:.2f}".format(time() - cut_start))
 
@@ -167,80 +171,89 @@ else:
 ##################### Create networks #################
 print("------------------- Creating networks -----------")
 network_start = time()
+
 # remove any origin segments
-barrier_segments = list(set(barrier_joins.upstream_id.unique()).difference({0}))
+barrier_segments = barrier_joins.loc[barrier_joins.upstream_id != 0][["upstream_id"]]
 
-print("generating upstream / downstream indices")
-join_ids = joins[["downstream_id", "upstream_id"]]
-# upstreams = (
-#     join_ids.groupby("downstream_id")["upstream_id"]
-#     .unique()
-#     .reset_index()
-#     .set_index("downstream_id")
-# )
-upstreams = join_ids.set_index("downstream_id")
-downstreams = join_ids.groupby("upstream_id")["downstream_id"].size()
+print("generating upstream index")
+# Remove origins, terminals, and barrier segments
+upstreams = (
+    joins.loc[
+        (joins.upstream_id != 0)
+        & (joins.downstream_id != 0)
+        & (~joins.upstream_id.isin(barrier_segments.upstream_id))
+    ]
+    .groupby("downstream_id")["upstream_id"]
+    .apply(list)
+    .to_dict()
+)
 
-# get_upstream_ids = lambda id: upstreams.loc[id].upstream_id
-def get_upstream_ids(id):
-    ids = upstreams.loc[id].upstream_id
-    if isinstance(ids, pd.Series):
-        return ids
-    # in case we got a single result back
-    return [ids]
-
-
-has_multiple_downstreams = lambda id: downstreams.loc[id] > 1
-
-# Create networks from all terminal nodes (no downstream nodes) up to origins or dams (but not including dam segments)
+# Create networks from all terminal nodes (no downstream nodes) up to barriers
 # Note: origins are also those that have a downstream_id but are not the upstream_id of another node
-root_ids = joins.loc[
-    (joins.downstream_id == 0) | (~joins.downstream_id.isin(joins.upstream_id.unique()))
-].upstream_id
-
-
-# TODO: can we refactor the following as a couple apply() statements?  Can build up a dict and then apply using map()
-print(
-    "Starting non-barrier functional network creation for {} origin points".format(
-        len(root_ids)
-    )
+origin_idx = (joins.downstream_id == 0) | (
+    ~joins.downstream_id.isin(joins.upstream_id.unique())
 )
-for start_id in root_ids:
-    network = generate_network(
-        start_id,
-        get_upstream_ids,
-        has_multiple_downstreams,
-        stop_segments=set(barrier_segments),
-    )
-
-    rows = flowlines.index.isin(network)
-    flowlines.loc[rows, "networkID"] = start_id
-    flowlines.loc[rows, "networkType"] = "origin_upstream"
-
-    # print("nonbarrier upstream network has {} segments".format(len(network)))
+not_barrier_idx = ~joins.upstream_id.isin(barrier_segments.upstream_id)
+root_ids = joins.loc[origin_idx & not_barrier_idx][["upstream_id"]].copy()
 
 print(
-    "Starting barrier functional network creation for {} barriers".format(
-        len(barrier_segments)
+    "Starting non-barrier functional network creation for {} origin points and {} barriers".format(
+        len(root_ids), len(barrier_segments)
     )
 )
-for start_id in barrier_segments:
-    network = generate_network(
-        start_id,
-        get_upstream_ids,
-        has_multiple_downstreams,
-        stop_segments=set(barrier_segments),
+
+root_ids["network"] = root_ids.upstream_id.apply(
+    lambda id: generate_network(id, upstreams)
+)
+
+# Pivot the lists back into a flat data frame:
+# adapted from: https://stackoverflow.com/a/48532692
+origin_networks = (
+    pd.DataFrame(
+        {
+            c: np.repeat(root_ids[c].values, root_ids["network"].apply(len))
+            for c in root_ids.columns.drop("network")
+        }
     )
+    .assign(**{"network": np.concatenate(root_ids["network"].values)})
+    .rename(columns={"upstream_id": "networkID"})
+    .set_index("network")
+)
+origin_networks["type"] = "origin"
 
-    rows = flowlines.index.isin(network)
-    flowlines.loc[rows, "networkID"] = start_id
-    flowlines.loc[rows, "networkType"] = "barrier_upstream"
-    # print("barrier upstream network has {} segments".format(len(network)))
 
-# drop anything that didn't get assigned a network
-# Note: network_df is still indexed on lineID
-network_df = flowlines.loc[~flowlines.networkID.isnull()].copy()
-network_df.networkID = network_df.networkID.astype("uint32")
+barrier_segments["network"] = barrier_segments.upstream_id.apply(
+    lambda id: generate_network(id, upstreams)
+)
+barrier_networks = (
+    pd.DataFrame(
+        {
+            c: np.repeat(
+                barrier_segments[c].values, barrier_segments["network"].apply(len)
+            )
+            for c in barrier_segments.columns.drop("network")
+        }
+    )
+    .assign(**{"network": np.concatenate(barrier_segments["network"].values)})
+    .rename(columns={"upstream_id": "networkID"})
+    .set_index("network")
+)
+
+barrier_networks["type"] = "barrier"
+
+
+# Append and join back to flowlines
+network_df = origin_networks.append(barrier_networks, sort=False)
+# Join back to flowline table, dropping anything that didn't get networks
+network_df = flowlines.join(network_df, how="inner")
+print(
+    "{0} total flowlines, {1} total network segments".format(
+        len(flowlines), len(network_df)
+    )
+)
+
+print("Networks done in {0:.2f}".format(time() - network_start))
+
 
 serialize_gdf(network_df, "network_segments.feather", index=False)
 print(

@@ -1,36 +1,18 @@
 # TODO: do we need igraph?  http://igraph.org/python/doc/tutorial/tutorial.html
 # Also see ideas here: http://matthewrocklin.com/blog/work/2017/09/21/accelerating-geopandas-1
+import pandas as pd
 
 
-def generate_network(id, get_upstream_ids, has_multiple_downstreams, stop_segments={}):
-    # print("segment {}".format(id))
-    ret = [id]
-
-    upstream_ids = get_upstream_ids(id)
-    # upstream_ids = join_df.loc[join_df.downstream == id].upstream
-
-    for upstream_id in upstream_ids:
-        if upstream_id == 0:  # Origin
-            # print("encountered origin segment: {}".format(id))
-            continue
-        # TODO: what about upstream IDs that are not in our table - e.g., connecting to nodes in next HUC
-
-        if upstream_id in stop_segments:
-            # Add to a separate tracking table
-            # Start a new network upstream from the upstream end of this one
-            # print("encountered segment with dam: {}".format(id))
-            continue
-
-        if has_multiple_downstreams(upstream_id):
-            # Make sure that we don't pass through this one multiple times!
-            stop_segments.add(upstream_id)
-
-        upstream_network = generate_network(
-            upstream_id, get_upstream_ids, has_multiple_downstreams, stop_segments
-        )
-        ret.extend(upstream_network)
-
-    return ret
+def generate_network(root_id, upstreams):
+    ids = [root_id]
+    network = []
+    while ids:
+        network.extend(ids)
+        upstream_ids = []
+        for id in ids:
+            upstream_ids.extend(upstreams.get(id, []))
+        ids = upstream_ids
+    return network
 
 
 def calculate_network_stats(df):
@@ -81,3 +63,44 @@ def calculate_network_stats(df):
 
     return stats_df[["km", "miles", "NetworkSinuosity", "NumSizeClassGained"]]
 
+
+# DEPRECATED: older, slower implementation
+# Depends on:
+
+# get_upstream_ids = lambda id: upstreams.loc[id].upstream_id
+# def get_upstream_ids(id):
+#     ids = upstreams.loc[id]
+#     if isinstance(ids, pd.Series):
+#         return ids
+#     # in case we got a single result back
+#     return [ids]
+
+# downstreams = join_ids.groupby("upstream_id")["downstream_id"].size()
+# has_multiple_downstreams = lambda id: downstreams.loc[id] > 1
+
+
+def generate_network_recursive(
+    id, get_upstream_ids, has_multiple_downstreams, stop_segments={}
+):
+    # print("segment {}".format(id))
+    ret = [id]
+
+    upstream_ids = get_upstream_ids(id)
+
+    for upstream_id in upstream_ids:
+        if upstream_id == 0:  # Origin
+            continue
+
+        if upstream_id in stop_segments:
+            continue
+
+        if has_multiple_downstreams(upstream_id):
+            # Make sure that we don't pass through this one multiple times!
+            stop_segments.add(upstream_id)
+
+        upstream_network = generate_network_recursive(
+            upstream_id, get_upstream_ids, has_multiple_downstreams, stop_segments
+        )
+        ret.extend(upstream_network)
+
+    return ret
