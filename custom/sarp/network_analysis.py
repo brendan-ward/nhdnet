@@ -270,7 +270,7 @@ network_stats = calculate_network_stats(network_df)
 
 network_stats.to_csv(
     "network_stats.csv",
-    columns=["km", "miles", "NetworkSinuosity", "NumSizeClassGained"],
+    columns=["km", "miles", "NetworkSinuosity", "NumSizeClassGained", "count"],
     index_label="networkID",
 )
 
@@ -282,6 +282,7 @@ barrier_joins.set_index("joinID", inplace=True)
 upstream_networks = (
     barriers.join(barrier_joins.upstream_id)
     .join(network_stats, on="upstream_id")
+    .fillna(0)
     .rename(columns={"upstream_id": "upNetID", "miles": "UpstreamMiles"})
 )
 
@@ -289,11 +290,13 @@ network_by_lineID = network_df[["lineID", "networkID"]].set_index("lineID")
 downstream_networks = (
     barrier_joins.join(network_by_lineID, on="downstream_id")
     .join(network_stats, on="networkID")
+    .fillna(0)
     .rename(columns={"networkID": "downNetID", "miles": "DownstreamMiles"})[
         ["downNetID", "DownstreamMiles"]
     ]
 )
 
+# TODO: unique name
 barrier_networks = upstream_networks.join(downstream_networks)
 
 # Absolute gain is minimum of upstream or downstream miles

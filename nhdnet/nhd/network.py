@@ -46,9 +46,19 @@ def calculate_network_stats(df):
     )
     num_sc_df = num_sc_df - 1  # subtract the size class we are on
 
+    segment_count_df = (
+        df[["networkID"]]
+        .groupby("networkID")
+        .size()
+        .reset_index()
+        .set_index("networkID")
+        .rename(columns={0: "count"})
+    )
+
     stats_df = (
         sum_length_df.join(wtd_sinuosity_df)
         .join(num_sc_df)
+        .join(segment_count_df)
         .rename(
             columns={
                 "wtd_sinuosity": "NetworkSinuosity",
@@ -61,7 +71,7 @@ def calculate_network_stats(df):
     stats_df["km"] = stats_df.length / 1000.0
     stats_df["miles"] = stats_df.length * 0.000621371
 
-    return stats_df[["km", "miles", "NetworkSinuosity", "NumSizeClassGained"]]
+    return stats_df[["km", "miles", "NetworkSinuosity", "NumSizeClassGained", "count"]]
 
 
 # DEPRECATED: older, slower implementation
