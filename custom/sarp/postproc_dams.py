@@ -4,7 +4,7 @@ import geopandas as gp
 from nhdnet.io import serialize_gdf, to_shp
 
 
-HUC2 = "06"
+HUC2 = "03"
 working_dir = "/Users/bcward/projects/data/sarp/nhd/{0}".format(HUC2)
 
 print("Reading dams")
@@ -14,7 +14,7 @@ print("Reading dams")
 dams = gp.read_file("{0}/dams_{1}_snapped.shp".format(working_dir, HUC2)).set_index(
     "AnalysisID"
 )
-dams = dams.loc[dams.SNAP2018 != 5].copy()
+dams = dams.loc[~dams.SNAP2018.isin([5, 6, 7])].copy()
 
 # QA dams that didn't snap have been removed; they were accidentally included in the above
 qa = gp.read_file("{0}/dams_{1}_qa.shp".format(working_dir, HUC2)).set_index(
