@@ -29,7 +29,7 @@ RESUME = True
 
 SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
-HUC2 = "06"
+HUC2 = "13"
 src_dir = "/Users/bcward/projects/data/sarp"
 working_dir = "{0}/nhd/{1}".format(src_dir, HUC2)
 os.chdir(working_dir)
@@ -138,8 +138,12 @@ else:
 if RESUME and os.path.exists("split_flowlines.feather"):
     print("reading cut segments and joins")
     joins = deserialize_df("updated_joins.feather")
-    barrier_joins = deserialize_df("barrier_joins.feather").set_index('joinID', drop=False)
-    flowlines = deserialize_gdf("split_flowlines.feather").set_index("lineID", drop=False)
+    barrier_joins = deserialize_df("barrier_joins.feather").set_index(
+        "joinID", drop=False
+    )
+    flowlines = deserialize_gdf("split_flowlines.feather").set_index(
+        "lineID", drop=False
+    )
 
 else:
     cut_start = time()
@@ -155,7 +159,7 @@ else:
 
     barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
     barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
-    barrier_joins.set_index('joinID', drop=False)
+    barrier_joins.set_index("joinID", drop=False)
 
     print("Done cutting in {:.2f}".format(time() - cut_start))
 
@@ -266,7 +270,10 @@ print(
 ##################### Network stats #################
 print("------------------- Aggregating network info -----------")
 
+print("calculating network stats")
 network_stats = calculate_network_stats(network_df)
+print("done calculating network stats")
+
 
 network_stats.to_csv(
     "network_stats.csv",
@@ -276,6 +283,8 @@ network_stats.to_csv(
 
 network_stats = network_stats[["miles", "NetworkSinuosity", "NumSizeClassGained"]]
 
+
+print("calculating upstream and downstream networks for barriers")
 # join to upstream networks
 barriers = barriers.set_index("joinID")[["kind"]]
 barrier_joins.set_index("joinID", inplace=True)
@@ -314,6 +323,7 @@ barrier_networks.to_csv("barrier_network.csv", index_label="joinID")
 # TODO: if downstream network extends off this HUC, it will be null in the above and AbsoluteGainMin will be wrong
 
 ##################### Dissolve networks on networkID ########################
+print("Dissolving networks")
 network_ids = network_stats.index
 
 columns = ["networkID", "geometry"] + list(network_stats.columns)
@@ -322,6 +332,7 @@ networks = gp.GeoDataFrame(columns=columns, geometry="geometry", crs=flowlines.c
 network_df = network_df.set_index("networkID", drop=False)
 
 # join in network stats
+# TODO: can we do this as an apply()?
 for id in network_ids:
     stats = network_stats.loc[id]
 
@@ -336,8 +347,8 @@ for id in network_ids:
     values = [id, geometry] + [stats[c] for c in network_stats.columns]
     networks.loc[id] = gp.GeoSeries(values, index=columns)
 
-# same as network stats
-# networks.drop(columns=["geometry"]).to_csv("network.csv", index=False)
+# force to integer, since it is getting converted to string in the shapefile
+networks.networkID = networks.networkID.astype("uint32")
 
 print("Writing dissolved network shapefile")
 serialize_gdf(networks, "network.feather", index=False)
