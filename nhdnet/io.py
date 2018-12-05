@@ -138,11 +138,10 @@ def to_shp(df, path):
     props = props.apply(lambda row: row.to_dict(), axis=1)
     # Convert features to JSON
     features = DataFrame(
-        {"id": df.index.astype(str), "geometry": geometry, "properties": props}
+        {"geometry": geometry, "properties": props}
     )
     features["type"] = "Feature"
     features = features.apply(lambda row: row.to_dict(), axis=1)
-    # print("writing features to shapefile")
     schema = infer_schema(df)
     with fiona.Env():
         with fiona.open(
