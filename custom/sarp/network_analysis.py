@@ -25,11 +25,11 @@ from constants import BARRIER_COLUMNS
 from stats import calculate_network_stats
 
 
-RESUME = False
+RESUME = True
 SMALL_BARRIERS = False
 
 
-HUC2 = "03"
+HUC2 = "11"
 src_dir = "/Users/bcward/projects/data/sarp"
 working_dir = "{0}/nhd/{1}".format(src_dir, HUC2)
 os.chdir(working_dir)
@@ -41,11 +41,6 @@ joins_feather = "flowline_joins.feather"
 
 # INPUT files from prepare_floodplain_stats.py
 fp_feather = "floodplain_stats.feather"
-
-# INPUT files from data sources and post QA (postproc_dams.py)
-# dams_feather = "dams_post_qa.feather"
-# waterfalls_filename = "{}/sarp_falls_huc2.shp".format(src_dir)
-
 
 # INPUT files from prepare_dams.py, prepare_waterfalls.py, prepare_small_barriers.py
 dams_feather = "{}/snapped_dams.feather".format(src_dir)
@@ -185,7 +180,7 @@ not_barrier_idx = ~joins.upstream_id.isin(barrier_segments.upstream_id)
 root_ids = joins.loc[origin_idx & not_barrier_idx][["upstream_id"]].copy()
 
 print(
-    "Starting non-barrier functional network creation for {} origin points and {} barriers".format(
+    "Starting network creation for {} origin points and {} barriers".format(
         len(root_ids), len(barrier_segments)
     )
 )
@@ -271,38 +266,26 @@ barrier_networks.to_csv(barrier_network_csv, index_label="joinID")
 ##################### Dissolve networks on networkID ########################
 print("Dissolving networks")
 dissolve_start = time()
-network_ids = network_stats.index
-
-columns = ["networkID", "geometry"] + list(network_stats.columns)
-networks = gp.GeoDataFrame(columns=columns, geometry="geometry", crs=flowlines.crs)
 
 network_df = network_df.set_index("networkID", drop=False)
 
-# join in network stats
-# TODO: can we do this as an apply()?
-for id in network_ids:
-    stats = network_stats.loc[id]
+dissolved = (
+    network_df[["geometry"]]
+    .groupby(network_df.index)
+    .geometry.apply(list)
+    .apply(MultiLineString)
+)
 
-    geometries = network_df.loc[id].geometry
-    # converting to list is very inefficient but otherwise
-    # we get an error in shapely internals
-    if isinstance(geometries, gp.GeoSeries):
-        geometry = MultiLineString(geometries.values.tolist())
-    else:
-        geometry = MultiLineString([geometries])
+networks = gp.GeoDataFrame(network_stats.join(dissolved), crs=flowlines.crs)
 
-    values = [id, geometry] + [stats[c] for c in network_stats.columns]
-    networks.loc[id] = gp.GeoSeries(values, index=columns)
-
-# force to integer, since it is getting converted to string in the shapefile
-networks.networkID = networks.networkID.astype("uint32")
+# add networkID back
+networks["networkID"] = networks.index.values.astype("uint32")
 
 print("Network dissolve done in {0:.2f}".format(time() - dissolve_start))
 
 print("Writing dissolved network shapefile")
 serialize_gdf(networks, network_feather, index=False)
 to_shp(networks, network_feather.replace(".feather", ".shp"))
-
 
 print("All done in {:.2f}".format(time() - start))
 

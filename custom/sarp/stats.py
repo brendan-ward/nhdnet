@@ -65,16 +65,8 @@ def calculate_network_stats(df):
     )
 
     # convert units
-    stats_df["km"] = stats_df.length / 1000.0
     stats_df["miles"] = stats_df.length * 0.000621371
 
     return stats_df[
-        [
-            "km",
-            "miles",
-            "NetworkSinuosity",
-            "NumSizeClassGained",
-            "PctNatFloodplain",
-            "count",
-        ]
+        ["miles", "NetworkSinuosity", "NumSizeClassGained", "PctNatFloodplain", "count"]
     ]
