@@ -9,6 +9,7 @@ from geopandas.io.file import infer_schema
 from shapely.wkb import loads
 from shapely.geometry import mapping
 import fiona
+from rtree.index import Index, Property
 
 
 def serialize_df(df, path, index=True):
@@ -137,9 +138,7 @@ def to_shp(df, path):
     props.replace({c: {np.nan: None} for c in prop_cols}, inplace=True)
     props = props.apply(lambda row: row.to_dict(), axis=1)
     # Convert features to JSON
-    features = DataFrame(
-        {"geometry": geometry, "properties": props}
-    )
+    features = DataFrame({"geometry": geometry, "properties": props})
     features["type"] = "Feature"
     features = features.apply(lambda row: row.to_dict(), axis=1)
     schema = infer_schema(df)
@@ -149,3 +148,44 @@ def to_shp(df, path):
         ) as writer:
             writer.writerecords(features)
 
+
+def serialize_sindex(df, path):
+    """Serilize the bounding coordinates necessary to recreate a spatial index
+    
+    Parameters
+    ----------
+    df : geopandas.GeoDataFrame
+        contains geometries and optional index, all other columns are ignored
+    path : str
+        path to write spatial index
+    """
+    geom_col = df._geometry_column_name
+    df = df[["geometry"]].join(df.geometry.bounds.astype("float32"))
+    df = df.reset_index(drop=not df.index.name)
+    serialize_df(df.drop(columns=["geometry"]), path)
+
+
+def deserialize_sindex(path):
+    """Converts serialized bounding coordinates into an rtree spatial index
+    
+    Parameters
+    ----------
+    path : str
+        path to spatial index
+    
+    Returns
+    -------
+    rtree.index.Index instance
+    """
+    df = deserialize_df(path)
+    extra_cols = df.columns.drop(["minx", "miny", "maxx", "maxy"])
+    if len(extra_cols):
+        index_col = extra_cols[0]
+    else:
+        index_col = "i"
+    df["i"] = df.index.values
+    df["b"] = df[["minx", "miny", "maxx", "maxy"]].values.tolist()
+    stream = df[["i", "b", index_col]].values.tolist()
+
+    # Note: do not pass in as stream parameter.  Docs impliy that should work.  It doesn't!
+    return Index(stream, properties=Property(leaf_capacity=1000))

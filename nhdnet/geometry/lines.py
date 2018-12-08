@@ -41,29 +41,6 @@ def calculate_sinuosity(geometry):
         sinuosity value
     """
 
-    # if geometry.type == "MultiLineString":
-    #     total_length = 0
-    #     results = []
-    #     for line in geometry:
-    #         length = line.length
-    #         total_length += length
-    #         straight_line_distance = Point(line.coords[0]).distance(
-    #             Point(line.coords[-1])
-    #         )
-
-    #         if straight_line_distance > 0:
-    #             sinuosity = length / straight_line_distance
-    #             results.append((length, sinuosity))
-
-    #     if total_length == 0:
-    #         return 1
-
-    #     # return weighted sum
-    #     return max(
-    #         sum([(length / total_length) * sinuosity for length, sinuosity in results]),
-    #         1,
-    #     )
-
     # By definition, sinuosity should not be less than 1
     line = geometry
     straight_line_distance = Point(line.coords[0]).distance(Point(line.coords[-1]))
@@ -73,7 +50,7 @@ def calculate_sinuosity(geometry):
     return 1  # if there is no straight line distance, there is no sinuosity
 
 
-def snap_to_line(lines, tolerance=100, prefer_endpoint=False):
+def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False):
     """
     Attempt to snap a line to the nearest line, within tolerance distance.
 
@@ -90,12 +67,14 @@ def snap_to_line(lines, tolerance=100, prefer_endpoint=False):
         maximum distance between line and point that can still be snapped
     prefer_endpoint : bool, optional (default False)
         if True, will try to match to the nearest endpoint on the nearest line
-        provided that the distance to that endpoint is less than tolerance
+        provided that the distance to that endpoint is less than tolerance.
+        NOTE: NOT YET WORKING PROPERLY - DO NOT USE!
 
     Returns
     -------
     geopandas.GeoDataFrame
         output data frame containing: 
+        * all columns from points except geometry
         * geometry: snapped geometry
         * snap_dist: distance between original point and snapped location
         * nearby: number of nearby lines within tolerance
@@ -154,14 +133,13 @@ def snap_to_line(lines, tolerance=100, prefer_endpoint=False):
         # return pd.Series(([None] * 4) + [None for c in line_columns], index=columns)
         return pd.Series([None] * len(columns), index=columns)
 
-    print("creating spatial index on lines")
     sindex = lines.sindex
     # Note: the spatial index is ALWAYS based on the integer index of the
     # geometries and NOT their index
 
-    # we are calling this as a curried function, so we return the func
-    # for the apply()
-    return snap
+    snapped = gp.GeoDataFrame(points.geometry.apply(snap), crs=points.crs)
+    points = points.drop(columns=["geometry"]).join(snapped)
+    return points.loc[~points.geometry.isnull()].copy()
 
 
 def cut_line_at_point(line, point):

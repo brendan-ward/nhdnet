@@ -22,7 +22,7 @@ SNAP_TOLERANCE = 100  # meters - tolerance for waterfalls
 
 src_dir = "/Users/bcward/projects/data/sarp/nhd"
 
-HUC2 = "03"
+HUC2 = "06"
 
 start = time()
 
@@ -31,6 +31,7 @@ start = time()
 # layer = "AllDamsInventoryMerge_11272018_SnappedandUnsnapped_preschema"
 # dams = gp.read_file(gdb, layer=layer)
 
+# TODO: OLD dataset
 all_wf = gp.read_file(
     "/Users/bcward/projects/data/sarp/Waterfalls_USGS_2017.gdb"
 ).to_crs(CRS)

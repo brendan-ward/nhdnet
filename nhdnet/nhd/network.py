@@ -1,9 +1,24 @@
-# TODO: do we need igraph?  http://igraph.org/python/doc/tutorial/tutorial.html
-# Also see ideas here: http://matthewrocklin.com/blog/work/2017/09/21/accelerating-geopandas-1
 import pandas as pd
+import numpy as np
 
 
 def generate_network(root_id, upstreams):
+    """Generate the upstream network from a starting id.
+
+    Intended to be used within an .apply() call
+    
+    Parameters
+    ----------
+    root_id : id type (int, str)
+        starting segment id that forms the root node of the upstream network
+    upstreams : dict
+        dictionary containing the list of upstream segment ids for each segment
+    
+    Returns
+    -------
+    list of all upstream ids in network traversing upward from root_id
+    """
+
     ids = [root_id]
     network = []
     while ids:
@@ -15,63 +30,39 @@ def generate_network(root_id, upstreams):
     return network
 
 
-def calculate_network_stats(df):
-    # for every network, calc length-weighted sinuosity and sum length
-    sum_length_df = (
-        df[["networkID", "length"]]
-        .groupby(["networkID"])
-        .sum()
-        .reset_index()
-        .set_index("networkID")
-    )
-    temp_df = df.join(sum_length_df, on="networkID", rsuffix="_total")
-    temp_df["wtd_sinuosity"] = temp_df.sinuosity * (
-        temp_df.length / temp_df.length_total
-    )
+def generate_networks(df, upstreams, column="upstream_id"):
+    """Generate the upstream networks for each record in the input data frame.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        data frame containing the ids that are the root of each upstream network
+    upstreams : dict
+        dictionary containing the list of upstream segment ids for each segment
+    column : str
+        the name of the column containing the ids from which to traverse the network upstream
+    
+    Returns
+    -------
+    pandas.DataFrame
+        contains all columns from df plus networkID.  Indexed on the values of df[column]
+    """
 
-    wtd_sinuosity_df = (
-        temp_df[["networkID", "wtd_sinuosity"]]
-        .groupby(["networkID"])
-        .sum()
-        .reset_index()
-        .set_index("networkID")
-    )
+    df["network"] = df[column].apply(lambda id: generate_network(id, upstreams))
 
-    num_sc_df = (
-        df[["networkID", "sizeclass"]]
-        .groupby("networkID")
-        .sizeclass.nunique()
-        .reset_index()
-        .set_index("networkID")
-    )
-    num_sc_df = num_sc_df - 1  # subtract the size class we are on
-
-    segment_count_df = (
-        df[["networkID"]]
-        .groupby("networkID")
-        .size()
-        .reset_index()
-        .set_index("networkID")
-        .rename(columns={0: "count"})
-    )
-
-    stats_df = (
-        sum_length_df.join(wtd_sinuosity_df)
-        .join(num_sc_df)
-        .join(segment_count_df)
-        .rename(
-            columns={
-                "wtd_sinuosity": "NetworkSinuosity",
-                "sizeclass": "NumSizeClassGained",
+    # Pivot the lists back into a flat data frame:
+    # adapted from: https://stackoverflow.com/a/48532692
+    return (
+        pd.DataFrame(
+            {
+                c: np.repeat(df[c].values, df["network"].apply(len))
+                for c in df.columns.drop("network")
             }
         )
+        .assign(**{"network": np.concatenate(df["network"].values)})
+        .rename(columns={column: "networkID"})
+        .set_index("network")
     )
-
-    # convert units
-    stats_df["km"] = stats_df.length / 1000.0
-    stats_df["miles"] = stats_df.length * 0.000621371
-
-    return stats_df[["km", "miles", "NetworkSinuosity", "NumSizeClassGained", "count"]]
 
 
 # DEPRECATED: older, slower implementation
