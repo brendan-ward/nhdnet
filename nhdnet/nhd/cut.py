@@ -28,9 +28,12 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     new_segments = []
     new_joins = []
 
-    segments_with_barriers = flowlines.loc[flowlines.index.isin(barriers.lineID)]
+    segments_with_barriers = flowlines.loc[flowlines.index.isin(barriers.lineID)][
+        ["NHDPlusID", "geometry"]
+    ]
     print("{} segments have at least one barrier".format(len(segments_with_barriers)))
-    for idx, row in segments_with_barriers.iterrows():
+    for row in segments_with_barriers.itertuples():
+        idx = row.Index
         # print("-----------------------\n\nlineID", idx)
 
         # Find upstream and downstream segments
@@ -112,8 +115,8 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
             # NHDPlusID of this segment
             # Do this for every upstream segment (if there are multiple upstream nodes)
             downstream_id = segments[0][0] if segments else idx
-            for _, barrier in us_points.iterrows():
-                for uIdx, upstream in upstreams.iterrows():
+            for barrier in us_points.itertuples():
+                for upstream in upstreams.itertuples():
                     barrier_joins.append(
                         {
                             "NHDPlusID": row.NHDPlusID,
@@ -128,8 +131,8 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
             # NHDPlusID of this segment
             # Do this for every downstream segment (if there are multiple downstream nodes)
             upstream_id = segments[-1][0] if segments else idx
-            for _, barrier in ds_points.iterrows():
-                for _, downstream in downstreams.iterrows():
+            for barrier in ds_points.itertuples():
+                for downstream in downstreams.itertuples():
                     barrier_joins.append(
                         {
                             "NHDPlusID": row.NHDPlusID,

@@ -50,7 +50,7 @@ def calculate_sinuosity(geometry):
     return 1  # if there is no straight line distance, there is no sinuosity
 
 
-def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False):
+def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False, sindex=None):
     """
     Attempt to snap a line to the nearest line, within tolerance distance.
 
@@ -133,9 +133,10 @@ def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False):
         # return pd.Series(([None] * 4) + [None for c in line_columns], index=columns)
         return pd.Series([None] * len(columns), index=columns)
 
-    sindex = lines.sindex
-    # Note: the spatial index is ALWAYS based on the integer index of the
-    # geometries and NOT their index
+    if sindex is None:
+        sindex = lines.sindex
+        # Note: the spatial index is ALWAYS based on the integer index of the
+        # geometries and NOT their index
 
     snapped = gp.GeoDataFrame(points.geometry.apply(snap), crs=points.crs)
     points = points.drop(columns=["geometry"]).join(snapped)

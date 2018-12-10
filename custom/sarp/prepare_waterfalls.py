@@ -6,10 +6,10 @@ import os
 import pandas as pd
 import geopandas as gp
 
-from nhdnet.io import serialize_gdf, deserialize_gdf
+from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex
 from nhdnet.geometry.lines import snap_to_line
 
-from constants import REGIONS, CRS, SNAP_TOLERANCE
+from constants import REGION_GROUPS, REGIONS, CRS, SNAP_TOLERANCE
 
 src_dir = "/Users/bcward/projects/data/sarp"
 
@@ -24,24 +24,26 @@ all_wf["joinID"] = all_wf.fall_id.astype("int").astype("str")
 
 snapped = None
 
-for HUC2 in REGIONS:
-    print("\n----- {} ------\n".format(HUC2))
-    os.chdir("{0}/nhd/{1}".format(src_dir, HUC2))
+for group in REGION_GROUPS:
+    print("\n----- {} ------\n".format(group))
+    os.chdir("{0}/nhd/region/{1}".format(src_dir, group))
 
     print("Reading flowlines")
     flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
     print("Read {0} flowlines".format(len(flowlines)))
 
-    print("Calculating spatial index on flowlines")
-    flowlines.sindex
+    # print("Calculating spatial index on flowlines")
+    # flowlines.sindex
+    print("Reading spatial index on flowlines")
+    sindex = deserialize_sindex("flowline.sidx")
 
     ######### Process Waterfalls
     # Extract out waterfalls in this HUC
-    wf = all_wf.loc[all_wf.HUC2 == HUC2].copy()
+    wf = all_wf.loc[all_wf.HUC2.isin(REGION_GROUPS[group])].copy()
     print("Selected {0} waterfalls in region".format(len(wf)))
 
     print("Snapping waterfalls")
-    wf = snap_to_line(wf, flowlines, SNAP_TOLERANCE)
+    wf = snap_to_line(wf, flowlines, SNAP_TOLERANCE, sindex=sindex)
     print("{} waterfalls were successfully snapped".format(len(wf)))
 
     if snapped is None:

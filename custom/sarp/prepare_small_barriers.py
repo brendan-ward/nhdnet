@@ -3,10 +3,10 @@ from time import time
 import pandas as pd
 import geopandas as gp
 
-from nhdnet.io import serialize_gdf, deserialize_gdf
+from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex
 from nhdnet.geometry.lines import snap_to_line
 
-from constants import REGIONS, CRS, SNAP_TOLERANCE
+from constants import REGION_GROUPS, REGIONS, CRS, SNAP_TOLERANCE
 
 
 src_dir = "/Users/bcward/projects/data/sarp"
@@ -42,24 +42,24 @@ all_sb["HUC2"] = all_sb.HUC12.str[:2]
 
 snapped = None
 
-for HUC2 in REGIONS:
-    print("\n----- {} ------\n".format(HUC2))
+for group in REGION_GROUPS:
+    print("\n----- {} ------\n".format(group))
 
-    os.chdir("{0}/nhd/{1}".format(src_dir, HUC2))
+    os.chdir("{0}/nhd/region/{1}".format(src_dir, group))
 
-    sb = all_sb.loc[all_sb.HUC2 == HUC2].copy()
-    print("Selected {0} small barriers in region {1}".format(len(sb), HUC2))
+    sb = all_sb.loc[all_sb.HUC2.isin(REGION_GROUPS[group])].copy()
+    print("Selected {0} small barriers in region {1}".format(len(sb), group))
 
     if len(sb):
         print("Reading flowlines")
         flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
         print("Read {0} flowlines".format(len(flowlines)))
 
-        print("Calculating spatial index on flowlines")
-        flowlines.sindex
+        print("Reading spatial index on flowlines")
+        sindex = deserialize_sindex("flowline.sidx")
 
         print("Snapping small barriers")
-        sb = snap_to_line(sb, flowlines, SNAP_TOLERANCE)
+        sb = snap_to_line(sb, flowlines, SNAP_TOLERANCE, sindex=sindex)
         print("{} small barriers were successfully snapped".format(len(sb)))
 
         if snapped is None:

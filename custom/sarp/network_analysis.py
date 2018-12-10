@@ -21,17 +21,17 @@ from nhdnet.io import (
     serialize_gdf,
 )
 
-from constants import BARRIER_COLUMNS
+from constants import BARRIER_COLUMNS, REGION_GROUPS
 from stats import calculate_network_stats
 
 
-RESUME = True
+RESUME = False
 SMALL_BARRIERS = False
 
 
-HUC2 = "11"
+group = "03"
 src_dir = "/Users/bcward/projects/data/sarp"
-working_dir = "{0}/nhd/{1}".format(src_dir, HUC2)
+working_dir = "{0}/nhd/region/{1}".format(src_dir, group)
 os.chdir(working_dir)
 
 
@@ -76,13 +76,13 @@ dams["kind"] = "dam"
 # TODO: will be handled in prepare_dams.py
 dams["HUC2"] = dams.HUC4.str[:2]
 
-dams = dams.loc[dams.HUC2 == HUC2].copy()
+dams = dams.loc[dams.HUC2.isin(REGION_GROUPS[group])].copy()
 print("Selected {} dams".format(len(dams)))
 
 wf = deserialize_gdf(waterfalls_feather)
 wf["kind"] = "waterfall"
 wf["AnalysisID"] = ""
-wf = wf.loc[wf.HUC2 == HUC2].copy()
+wf = wf.loc[wf.HUC2.isin(REGION_GROUPS[group])].copy()
 print("Selected {} waterfalls".format(len(wf)))
 
 barriers = dams[BARRIER_COLUMNS].append(
@@ -92,7 +92,7 @@ barriers = dams[BARRIER_COLUMNS].append(
 if SMALL_BARRIERS:
     sb = deserialize_gdf(small_barriers_feather)
     sb["kind"] = "small_barrier"
-    sb = sb.loc[sb.HUC2 == HUC2].copy()
+    sb = sb.loc[sb.HUC2.isin(REGION_GROUPS[group])].copy()
     print("Selected {} small barriers".format(len(sb)))
 
     if len(sb):
@@ -133,7 +133,8 @@ else:
 
     joins = deserialize_df(joins_feather)
     # since all other lineIDs use HUC4 prefixes, this should be unique
-    next_segment_id = int(HUC2) * 1000000 + 1
+    # Use the first HUC2 for the region group
+    next_segment_id = int(REGION_GROUPS[group][0]) * 1000000 + 1
     flowlines, joins, barrier_joins = cut_flowlines(
         flowlines, barriers, joins, next_segment_id=next_segment_id
     )

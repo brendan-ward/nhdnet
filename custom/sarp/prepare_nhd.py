@@ -23,6 +23,9 @@ for i in REGIONS[HUC2]:
     gdb = "{0}/NHDPLUS_H_{1}_HU4_GDB/NHDPLUS_H_{1}_HU4_GDB.gdb".format(src_dir, HUC4)
     flowlines, joins = extract_flowlines(gdb, target_crs=CRS)
 
+    flowlines.FType = flowlines.FType.astype("uint16")
+    flowlines.StreamOrde = flowlines.StreamOrde.astype("uint8")
+
     print("Extract Done in {:.2f}".format(time() - start))
 
     # Write to shapefile and CSV for easier processing later
@@ -30,9 +33,6 @@ for i in REGIONS[HUC2]:
     serialize_df(
         flowlines.drop(columns=["geometry"]), "{}/flowline_data.feather".format(out_dir)
     )
-    # flowlines.drop(columns=["geometry"]).to_csv(
-    #     "{}/flowline.csv".format(out_dir), index=False
-    # )
 
     print("Writing segment connections")
     serialize_df(joins, "{}/flowline_joins.feather".format(out_dir), index=False)

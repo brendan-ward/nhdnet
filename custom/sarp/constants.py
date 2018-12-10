@@ -10,6 +10,18 @@ REGIONS = {
     "13": [3, 4, 5, 7, 8, 9],
 }
 
+# Group regions based on which ones flow into each other
+# Note: many of these flow into region 08, which is not yet available
+REGION_GROUPS = {
+    "02": ["02"],
+    "03": ["03"],
+    "05_06": ["05", "06"],
+    "07_10": ["07", "10"],
+    "11": ["11"],
+    "12": ["12"],
+    "13": ["13"],
+}
+
 SNAP_TOLERANCE = 100  # meters
 
 
