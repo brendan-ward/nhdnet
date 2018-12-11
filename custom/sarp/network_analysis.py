@@ -26,10 +26,10 @@ from stats import calculate_network_stats
 
 
 RESUME = False
-SMALL_BARRIERS = False
+SMALL_BARRIERS = True
 
 
-group = "03"
+group = "07_10"
 src_dir = "/Users/bcward/projects/data/sarp"
 working_dir = "{0}/nhd/region/{1}".format(src_dir, group)
 os.chdir(working_dir)
@@ -40,7 +40,7 @@ flowline_feather = "flowline.feather"
 joins_feather = "flowline_joins.feather"
 
 # INPUT files from prepare_floodplain_stats.py
-fp_feather = "floodplain_stats.feather"
+fp_feather = "{}/floodplain_stats.feather".format(src_dir)
 
 # INPUT files from prepare_dams.py, prepare_waterfalls.py, prepare_small_barriers.py
 dams_feather = "{}/snapped_dams.feather".format(src_dir)
@@ -209,7 +209,9 @@ serialize_gdf(network_df, network_segments_feather, index=False)
 print("------------------- Aggregating network info -----------")
 
 # Read in associated floodplain info and join
-fp_stats = deserialize_df(fp_feather).set_index("NHDPlusID")
+fp_stats = deserialize_df(fp_feather)
+fp_stats = fp_stats.loc[fp_stats.HUC2.isin(REGION_GROUPS[group])].set_index("NHDPlusID")
+
 network_df = network_df.join(fp_stats, on="NHDPlusID")
 
 print("calculating network stats")
