@@ -1,3 +1,19 @@
+"""
+Extract NHD File Geodatabases (FGDB) for all HUC4s within a region (HUC2).
+
+Only the flowlines, joins between flowlines, and specific attributes are extracted for analysis.
+
+Due to data limitations of the FGDB / Shapefile format, NHDPlus IDs are represented natively as float64 data.
+However, float64 data are not ideal for indexing, so all IDs are converted to uint64 within this package, and
+converted back to float64 only for export to GIS.
+
+These are output as 2 files:
+* flowlines.feather: serialized flowline geometry and attributes
+* flowline_joins.feather: serialized joins between adjacent flowlines, with the upstream and downstream IDs of a join
+
+Note: there are cases where Geopandas is unable to read a FGDB file.  See `nhdnet.nhd.extract` for specific workarounds.
+"""
+
 import os
 from time import time
 
@@ -28,23 +44,14 @@ for i in REGIONS[HUC2]:
 
     print("Extract Done in {:.2f}".format(time() - start))
 
-    # Write to shapefile and CSV for easier processing later
-    print("Writing flowlines to disk")
-    serialize_df(
-        flowlines.drop(columns=["geometry"]), "{}/flowline_data.feather".format(out_dir)
-    )
-
-    print("Writing segment connections")
-    serialize_df(joins, "{}/flowline_joins.feather".format(out_dir), index=False)
-    # joins.to_csv("{}/flowline_joins.csv".format(out_dir), index=False)
-    print("CSVs done in {:.2f}".format(time() - start))
-
-    shp_start = time()
-    # Always write NHDPlusID back out as a float64
     print("Serializing flowlines geo file")
     serialize_gdf(flowlines, "{}/flowline.feather".format(out_dir), index=False)
 
-    # If a shapefile is needed
+    print("Writing segment connections")
+    serialize_df(joins, "{}/flowline_joins.feather".format(out_dir), index=False)
+
+
+    # If a shapefile is needed - need to convert ID back to a float
     # geo_df = flowlines.copy()
     # geo_df.NHDPlusID = geo_df.NHDPlusID.astype("float64")
     # to_shp(geo_df, "{}/flowline.shp".format(out_dir))

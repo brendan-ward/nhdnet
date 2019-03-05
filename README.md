@@ -1,4 +1,27 @@
-# US National Hydrography Dataset Barrier Analysis Tools
+# U.S. National Hydrography Dataset Barrier Analysis Tools
+
+This library was used to help perform network connectivity analysis for the [Southeast Aquatic Barrier Prioritization Tool](https://connectivity.sarpdata.com). See `custom/sarp/README.md` for more information about specific processing for that project.
+
+This library is intended to provide more general processing utilities to assist with analyzing connectivity using the National Hydrography Dataset (NHD) - High Resolution Plus version.
+
+We do not currently intend to add support for the NHD - Medum Resolution dataset. Pull requests are welcome to add this functionality.
+
+Due to the large size of NHD data, it may be possible to only process a single region at a time, or a group of regions. The key limits are based on the amount of available memory (RAM) and the file sizes of the outputs (shapefiles are limited to 2 GB in size).
+
+Key features:
+
+-   preprocessing utilities to prepare NHD data for analysis within this library
+-   merging of NHD flowlines between adjacent basins or regions
+-   automatic snapping barriers to nearest flowlines, including heuristics to aid with manual QA/QC
+-   cutting of NHD flowlines at barriers
+-   construction of functional upstream networks from a barrier to the next upstream barriers or origins of a stream network
+-   network statistics
+-   optimized data I/O using the `feather` file format for intermediate data products and customized serialization / deserialization of spatial data
+
+Notes:
+
+-   reading / writing shapefiles using Geopandas can be very slow. We preferred to use the `feather` format and custom packaging of spatial data for internal processing steps to greatly speed up data processing.
+-   data from NHD are downloaded as ArcGIS File Geodatabases. While these formats can be read (usually) using Geopandas, it is not possible to write this format, so shapefile outputs are generally the only option for use in GIS.
 
 ## Installation
 
@@ -21,18 +44,9 @@ Python dependencies and virtual environment are managed using [`pipenv`](https:/
 pipenv install
 ```
 
-## WORK IN PROGRESS
-
-This project is very much in progress and many kinks are still being worked out! Use with caution!
-
-Known issues:
-
--   joins of flowlines that cross between HUC4s need to be handled
+If you do not wish to use `pipenv`, see the `Pipfile` for the list of dependencies.
 
 ## Operation
-
-Right now, the code is very specific to how we are analyzing data for the SE Barriers Inventory Project. We currently only
-support using NHD High Resolution data.
 
 NHD High Resolution data are downloaded by HUC4 from [NHD Data Distribution Site](https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Hydrography/NHDPlus/HU4/HighResolution/GDB/).
 
@@ -47,6 +61,16 @@ Run times vary from 2-20 minutes.
 
 This project uses `black` for autoformatting and `pylint` for linting.
 
+## WORK IN PROGRESS
+
+This project is very much in progress and many kinks are still being worked out! Use with caution!
+
+Known issues:
+
+-   joins of flowlines that cross between HUC4s need to be handled
+
 ## Credits
 
 This project was made possible in partnership with the [Southeast Aquatic Resources Partnership](https://southeastaquatics.net) as part of a larger project to develop a comprehensive inventory of aqautic barriers in the Southeastern US and assess impacts of these barriers on aquatic systems.
+
+The results of this project are available in the [Southeast Aquatic Barrier Prioritization Tool](https://connectivity.sarpdata.com).
