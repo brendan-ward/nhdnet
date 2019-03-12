@@ -1,6 +1,6 @@
 """This is the main processing script.
 
-Run this after preparing NHD data for the HUC4 identified below.
+Run this after preparing NHD data for the region group identified below.
 
 """
 import os
@@ -25,11 +25,20 @@ from constants import BARRIER_COLUMNS, REGION_GROUPS
 from stats import calculate_network_stats
 
 
+### START Runtime variables
+# These should be the only variables that need to be changed at runtime
+
 RESUME = False
+# Set to True to re-use previously calculated intermediate files.  This can save time when debugging later steps.
+
 SMALL_BARRIERS = True
+# Set to True when you want to include small barriers in the analysis.  When included, small barriers are treated as HARD barriers. and WILL affect the results for dams.
+
+group = "07_10"  # Identifier of region group or region
+
+### END Runtime variables
 
 
-group = "07_10"
 src_dir = "/Users/bcward/projects/data/sarp"
 working_dir = "{0}/nhd/region/{1}".format(src_dir, group)
 os.chdir(working_dir)
@@ -48,14 +57,17 @@ waterfalls_feather = "{}/snapped_waterfalls.feather".format(src_dir)
 small_barriers_feather = "{}/snapped_small_barriers.feather".format(src_dir)
 
 
-# INTERMEDIATE / OUTPUT files
 suffix = "small_barriers" if SMALL_BARRIERS else "dams"
+
+# INTERMEDIATE files
 barrier_feather = "barriers_{}.feather".format(suffix)
 split_flowline_feather = "split_flowlines_{}.feather".format(suffix)
 updated_joins_feather = "updated_joins_{}.feather".format(suffix)
 barrier_joins_feather = "barrier_joins_{}.feather".format(suffix)
 network_feather = "network_{}.feather".format(suffix)
 network_segments_feather = "network_segments_{}.feather".format(suffix)
+
+# OUTPUT files
 network_stats_csv = "network_stats_{}.csv".format(suffix)
 barrier_network_csv = "barriers_network_{}.csv".format(suffix)
 

@@ -1,4 +1,4 @@
-# SARP Aquatic Connectivity Analysis Utilities
+# NHD Data Processing for Southeast Aquatic Barrier Inventory
 
 ## Purpose
 
@@ -15,7 +15,20 @@ These barriers are analyzed to produce 2 groups of outputs:
 -   network metrics for dams, based on cutting the network for all dams and waterfalls
 -   network metrics for small barriers, based on cutting the network for all dams, waterfalls, and small barriers
 
-## Workflow
+## Overall workflow:
+
+1. Download NHDPlus HR data for all applicable HUC4s that have dams. Note: Region 8 is not available yet.
+2. Get the barriers inventory from Kat at SARP
+3. Run `prepare_nhd.py` for each applicable region
+4. Run `merge.py` to merge HUC4s to regions and region groups for later processing
+5. Run `create_spatial_indices.py` to create the spatial indices needed for later processing
+6. Run `snap_dams_for_qa.py` to generate dams for manual QA. Send these to Kat. She moves points to get them in the right place, removes ones that are not present at all, and codes them as to known off-network dams. Right now, this is limited only to those likely to snap to the largest size classes in the network.
+7. Run `prep_dams.py` to snap all QA'd dams to the network
+8. Run `prep_small_barriers.py` to snap all small barriers to the network
+9. Run `prep_waterfalls` to snap all waterfalls to the network.
+10. Run `network_analysis.py` for the actual network analysis (cutting of segments, dissolving functional networks, network stats, etc)
+
+## Detailed Workflow
 
 See `README.md` in the project root for installation instructions.
 
@@ -70,3 +83,16 @@ The floodplain statistics were generated in ArcGIS by:
 Note: some catchments have no floodplain, and some have floodplains but no NHDPlusID (outside HUC4s we processed). These are filtered out.
 
 These data were exported to a FGDB, and prepared for analysis here using `prepare_floodplain_stats.py`.
+
+### Perform network analysis
+
+Once all the inputs are prepared using the above steps, you can now perform the network analysis for that region or group of regions.
+
+1. Run `network_analysis.py` once for dams (set `SMALL_BARRIERS = False`)
+2. Run `network_analysis.py` again for small barriers (set `SMALL_BARRIERS = True`)
+
+This can take 10 - 60+ minutes depending on the size and complexity of the region.
+
+This cuts the network at each barrier and associates each barrier with an upstream and downstream flowline segment ID. It automatically calculates a new unique ID for a segment if it is creating a new segment between two barriers on the same original flowline segment. The networks are then re-assembled by traversing upstream from the downstream-most points of the NHD flowlines or from each barrier.
+
+The output of this is a shapefile with one feature per functional network, a network summary statistics CSV, and a CSV including the upstream and downstream network IDs associated with each barrier.

@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 
+from nhdnet.io import deserialize_gdf, to_shp
+
 from constants import REGION_GROUPS
 
 
@@ -13,8 +15,8 @@ for barrier_type in ("dams", "small_barriers"):
     merged = None
     for group in REGION_GROUPS:
         print("------- {} -------".format(group))
-        df = pd.read_csv(
-            "{0}/nhd/region/{1}/barriers_network_{2}.csv".format(
+        df = deserialize_gdf(
+            "{0}/nhd/region/{1}/barriers_{2}.feather".format(
                 src_dir, group, barrier_type
             )
         )
@@ -24,7 +26,5 @@ for barrier_type in ("dams", "small_barriers"):
         else:
             merged = merged.append(df, ignore_index=True, sort=False)
 
-    merged.to_csv(
-        "{0}/barriers_network_{1}.csv".format(out_dir, barrier_type), index=False
-    )
-
+    print("Serializing to shapefile")
+    to_shp(merged, "{0}/barriers_{1}.shp".format(out_dir, barrier_type))
