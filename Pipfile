@@ -4,14 +4,16 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-pandas = "*"
 geopandas = "*"
 rtree = "*"
-nhdnet = {editable = true, path = "."}
+nhdnet = {editable = true,path = "."}
 feather-format = "*"
-fuzzywuzzy = {version = "*", extras = ["speedup"]}
+fuzzywuzzy = {version = "*",extras = ["speedup"]}
+requests = "*"
 
 [dev-packages]
+pylint = "*"
+black = "==19.3b0"
 
 [requires]
-python_version = "3.6"
+python_version = "3.7"
