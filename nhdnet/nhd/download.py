@@ -5,6 +5,16 @@ DATA_URL = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHDPlusH
 
 
 def download_huc4(HUC4, filename):
+    """Download HUC4 geodatabase (flowlines and boundaries) from NHD Plus HR data distribution site
+    
+    Parameters
+    ----------
+    HUC4 : str
+        HUC4 ID code
+    filename : str
+        output filename.  Will always overwrite this filename.
+    """
+
     with requests.get(DATA_URL.format(HUC4=HUC4), stream=True) as r:
         with open(filename, "wb") as out:
             print(
