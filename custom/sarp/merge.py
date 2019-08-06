@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 from time import time
 from nhdnet.io import (
@@ -10,7 +11,8 @@ from nhdnet.io import (
 
 from constants import REGIONS, REGION_GROUPS
 
-src_dir = "/Users/bcward/projects/data/sarp/nhd"
+huc4_dir = Path("../data/sarp/derived/nhd/huc4")
+out_dir = Path("../data/sarp/derived/nhd/region")
 
 start = time()
 
@@ -18,9 +20,13 @@ for group in REGION_GROUPS:
     group_start = time()
     print("-------- Group {} --------".format(group))
 
-    out_dir = "{0}/region/{1}".format(src_dir, group)
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    region_dir = out_dir / group
+    if not os.path.exists(region_dir):
+        os.makedirs(region_dir)
+
+    if os.path.exists(region_dir / "flowline.feather"):
+        print("Skipping existing region {}".format(group))
+        continue
 
     merged = None
     merged_joins = None
@@ -31,12 +37,11 @@ for group in REGION_GROUPS:
         for i in REGIONS[HUC2]:
             HUC4 = "{0}{1:02d}".format(HUC2, i)
             huc_id = int(HUC4) * 1000000
-            huc_dir = "{0}/{1}".format(src_dir, HUC4)
 
             print("Processing {}".format(HUC4))
 
             # Merge flowlines
-            flowlines = deserialize_gdf("{}/flowline.feather".format(huc_dir))
+            flowlines = deserialize_gdf(huc4_dir / HUC4 / "flowline.feather")
             print("Read {} flowlines".format(len(flowlines)))
             flowlines["HUC4"] = HUC4
             flowlines["lineID"] += huc_id
@@ -51,7 +56,7 @@ for group in REGION_GROUPS:
                 merged = merged.append(flowlines, ignore_index=True)
 
             # Merge joins
-            joins = deserialize_df("{}/flowline_joins.feather".format(huc_dir))
+            joins = deserialize_df(huc4_dir / HUC4 / "flowline_joins.feather")
             joins["HUC4"] = HUC4
             # TODO: this can be replaced when flowlines are re-extracted
             joins.upstream_id = joins.upstream_id.astype("uint32")
@@ -83,12 +88,12 @@ for group in REGION_GROUPS:
     ].copy()
 
     print("serializing {} flowlines to feather".format(len(merged)))
-    serialize_gdf(merged, "{}/flowline.feather".format(out_dir))
-    serialize_df(merged_joins, "{}/flowline_joins.feather".format(out_dir), index=False)
+    serialize_gdf(merged, region_dir / "flowline.feather")
+    serialize_df(merged_joins, region_dir / "flowline_joins.feather", index=False)
 
     print("serializing to shp")
     serialize_start = time()
-    to_shp(merged, "{}/flowline.shp".format(out_dir))
+    to_shp(merged, region_dir / "flowline.shp")
     print("serialize done in {:.2f}".format(time() - serialize_start))
 
     print("Group Done in {:.2f}".format(time() - group_start))

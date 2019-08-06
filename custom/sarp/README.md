@@ -18,11 +18,11 @@ These barriers are analyzed to produce 2 groups of outputs:
 ## Overall workflow:
 
 1. Download NHDPlus HR data for all applicable HUC4s that have dams. Note: Region 8 is not available yet.
-2. Get the barriers inventory from Kat at SARP
+2. Get the barriers inventory from Kat Hoenke at SARP
 3. Run `prepare_nhd.py` for each applicable region
 4. Run `merge.py` to merge HUC4s to regions and region groups for later processing
 5. Run `create_spatial_indices.py` to create the spatial indices needed for later processing
-6. Run `snap_dams_for_qa.py` to generate dams for manual QA. Send these to Kat. She moves points to get them in the right place, removes ones that are not present at all, and codes them as to known off-network dams. Right now, this is limited only to those likely to snap to the largest size classes in the network.
+6. Run `snap_dams_for_qa.py` to generate dams for manual QA. Send these to Kat. She moves points to get them in the right place, removes ones that are not present at all, and codes them as to known off-network dams. Right now, this is limited only to those likely to snap to the largest size classes in the network. Same for `snap_waterfalls_for_qa.py`.
 7. Run `prep_dams.py` to snap all QA'd dams to the network
 8. Run `prep_small_barriers.py` to snap all small barriers to the network
 9. Run `prep_waterfalls` to snap all waterfalls to the network.
@@ -38,7 +38,7 @@ See `constants.py` for constants that are used to define the HUC4s extracted wit
 
 ### Prepare of NHD data:
 
-1. NHD High Resolution Plus (NHD HR) Data are downloaded from the NHD data distribution website by HUC4.
+1. NHD High Resolution Plus (NHD HR) Data are downloaded from the NHD data distribution website by HUC4 using `download.py`.
 2. NHD data are extracted to an internal format using `prepare_nhd.py`. Enter the appropriate region number and output directory. This produces `flowlines.feather` and `flowline_joins.feather` for that region.
 3. Adjacent regions are merged using `merge.py`. This produces `flowlines.feather` and `flowline_joins.feather` for that group.
 4. Spatial indices are added to the merged flowlines in order to speed up operations such as snapping barriers to the flowlines. This is done with `create_spatial_indices.py`.
