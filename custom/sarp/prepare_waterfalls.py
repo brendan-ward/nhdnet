@@ -1,41 +1,78 @@
 """
-Extract barriers from data sources, cut by HUC2, and convert to feather format.
+Extract waterfalls from original data source, process for use in network analysis, and convert to feather format.
+1. Remove records with bad coordinates (one waterfall was represented in wrong projection)
+2. Cleanup data values (as needed)
+3. Snap to networks by HUC2 and merge into single data frame
 """
 
-import os
+from pathlib import Path
 import pandas as pd
 import geopandas as gp
 
-from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex
+from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex, to_shp
 from nhdnet.geometry.lines import snap_to_line
 
 from constants import REGION_GROUPS, REGIONS, CRS, SNAP_TOLERANCE
 
-src_dir = "/Users/bcward/projects/data/sarp"
+data_dir = Path("../data/sarp/")
+nhd_dir = data_dir / "derived/nhd/region"
+wbd_dir = data_dir / "nhd/wbd"
+sarp_dir = data_dir / "inventory"
+out_dir = data_dir / "derived/inputs"
+qa_dir = data_dir / "qa"
+gdb_filename = "Waterfalls2019.gdb"
 
 
 print("Reading waterfalls")
 
-# Note: this was pre-processed to add in HUC2 codes (via sjoin in pandas)
-all_wf = gp.read_file("{}/sarp_falls_huc2.shp".format(src_dir)).to_crs(CRS)[
-    ["fall_id", "name", "HUC2", "geometry"]
+all_wf = gp.read_file(sarp_dir / gdb_filename)[
+    ["geometry", "Source", "fall_id", "LocalID"]
 ]
-all_wf["joinID"] = all_wf.fall_id.astype("int").astype("str")
 
+all_wf["joinID"] = all_wf.index.astype("uint")
+
+### Drop records with bad coordinates
+all_wf = all_wf.loc[all_wf.geometry.y.abs() <= 90]
+
+### Cleanup data
+all_wf.Source = all_wf.Source.str.strip()
+amy_idx = all_wf.Source == "Amy Cottrell, Auburn"
+all_wf.loc[amy_idx, "Source"] = "Amy Cotrell, Auburn University"
+
+### Add persistant sourceID based on original IDs
+all_wf["sourceID"] = all_wf.LocalID
+usgs_idx = ~all_wf.fall_id.isnull()
+all_wf.loc[usgs_idx, "sourceID"] = (
+    all_wf.loc[usgs_idx].fall_id.astype("int").astype("str")
+)
+
+### Assign HUC2
+print("Reading HUC2 boundaries and joining to waterfalls")
+huc2 = gp.read_file(wbd_dir / "HUC2/HUC2.shp")
+all_wf.sindex
+huc2.sindex
+all_wf = gp.sjoin(all_wf, huc2[["geometry", "HUC2"]], how="left").drop(
+    columns=["index_right"]
+)
+
+### Reproject to CONUS Albers
+all_wf = all_wf.to_crs(CRS)
+
+print("Starting snapping for {} waterfalls".format(len(all_wf)))
 snapped = None
 
 for group in REGION_GROUPS:
     print("\n----- {} ------\n".format(group))
-    os.chdir("{0}/nhd/region/{1}".format(src_dir, group))
+    src_dir = nhd_dir / group
 
     print("Reading flowlines")
-    flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
+    flowlines = deserialize_gdf(src_dir / "flowline.feather").set_index(
+        "lineID", drop=False
+    )
     print("Read {0} flowlines".format(len(flowlines)))
 
-    # print("Calculating spatial index on flowlines")
-    # flowlines.sindex
     print("Reading spatial index on flowlines")
-    sindex = deserialize_sindex("flowline.sidx")
+    sindex = deserialize_sindex(src_dir / "flowline.sidx")
 
     ######### Process Waterfalls
     # Extract out waterfalls in this HUC
@@ -51,8 +88,15 @@ for group in REGION_GROUPS:
     else:
         snapped = snapped.append(wf, sort=False, ignore_index=True)
 
-
 print("\n--------------\n")
 print("Serializing {0} snapped waterfalls out of {1}".format(len(snapped), len(all_wf)))
-serialize_gdf(snapped, "{}/snapped_waterfalls.feather".format(src_dir), index=False)
+serialize_gdf(snapped, out_dir / "snapped_waterfalls.feather", index=False)
+
+
+# Write out those that didn't snap for QA
+print("writing shapefiles for QA/QC")
+to_shp(snapped, qa_dir / "snapped_waterfalls.shp")
+
+unsnapped = all_wf.loc[~all_wf.joinID.isin(snapped.joinID)]
+to_shp(unsnapped, qa_dir / "unsnapped_waterfalls.shp")
 

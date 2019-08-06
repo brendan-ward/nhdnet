@@ -1,61 +1,134 @@
-import os
+"""
+Extract dams from original data source, process for use in network analysis, and convert to feather format.
+1. Cleanup data values (as needed)
+2. Filter out dams not to be included in analysis (based on PotentialFeasibility and Snap2018)
+3. Remove duplicate dams
+4. Snap to networks by HUC2 and merge into single data frame
+"""
+
+from pathlib import Path
+from time import time
 import pandas as pd
 import geopandas as gp
 
-from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex
+from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex, to_shp
 from nhdnet.geometry.lines import snap_to_line
+from nhdnet.geometry.points import remove_duplicates
 
-from constants import REGION_GROUPS, REGIONS, CRS, SNAP_TOLERANCE
+from constants import (
+    REGION_GROUPS,
+    REGIONS,
+    CRS,
+    SNAP_TOLERANCE,
+    DUPLICATE_TOLERANCE,
+    DROP_SNAP2018,
+    DROP_FEASIBILITY,
+)
 
 
-src_dir = "/Users/bcward/projects/data/sarp"
+QA = True
+
+
+data_dir = Path("../data/sarp/")
+nhd_dir = data_dir / "derived/nhd/region"
+sarp_dir = data_dir / "inventory"
+out_dir = data_dir / "derived/inputs"
+qa_dir = data_dir / "qa"
+dams_filename = "Dams_Webviewer_DraftOne_Final.gdb"
+
+
+start = time()
+
+all_dams = gp.read_file(sarp_dir / dams_filename)
+print("Read {} dams".format(len(all_dams)))
+
+if QA:
+    orig_df = all_dams.copy()
+
+### Cleanup data
+all_dams.Snap2018 = all_dams.Snap2018.fillna(0).astype("uint8")
+all_dams.PotentialFeasibility = all_dams.PotentialFeasibility.fillna(0).astype("uint8")
+all_dams.Recon = all_dams.Recon.fillna(0).astype("uint8")
+
+# Fix Recon value that wasn't assigned to Snap2018
+# these are invasive species barriers
+all_dams.loc[all_dams.Recon == 16, "Snap2018"] = 10
+
+
+### Filter out dams by Snap2018 and PotentialFeasibility
+all_dams = all_dams.loc[
+    ~(
+        all_dams.Snap2018.isin(DROP_SNAP2018)
+        | all_dams.PotentialFeasibility.isin(DROP_FEASIBILITY)
+    )
+][["AnalysisID", "HUC12", "geometry"]].to_crs(CRS)
+print("{} dams left after filtering".format(len(all_dams)))
+
+if QA:
+    orig_df.loc[~orig_df.index.isin(all_dams.index), "dropped"] = "drop SNAP2018"
+
+### Remove duplicates (within DUPLICATE_TOLERANCE)
+all_dams = remove_duplicates(all_dams, DUPLICATE_TOLERANCE)
+print("{} dams left after removing duplicates".format(len(all_dams)))
+
+if QA:
+    orig_df.loc[
+        ~orig_df.index.isin(all_dams.index) & orig_df.dropped.isnull(), "dropped"
+    ] = "drop duplicate"
+
+
+all_dams["joinID"] = all_dams.AnalysisID
+
+# NOTE: these currently include HUC12, which we use for deriving HUC2
+# Long term, this may need to be replaced with a spatial join here
+all_dams["HUC2"] = all_dams.HUC12.str[:2]
+
 
 snapped = None
 
 for group in REGION_GROUPS:
     print("\n----- {} ------\n".format(group))
-    os.chdir("{0}/nhd/region/{1}".format(src_dir, group))
+
+    region_dir = nhd_dir / group
+
+    dams = all_dams.loc[all_dams.HUC2.isin(REGION_GROUPS[group])].copy()
+    print("Selected {0} small barriers in region {1}".format(len(dams), group))
 
     print("Reading flowlines")
-    flowlines = deserialize_gdf("flowline.feather").set_index("lineID", drop=False)
+    flowlines = deserialize_gdf(region_dir / "flowline.feather").set_index(
+        "lineID", drop=False
+    )
     print("Read {0} flowlines".format(len(flowlines)))
 
     print("Reading spatial index on flowlines")
-    sindex = deserialize_sindex("flowline.sidx")
+    sindex = deserialize_sindex(region_dir / "flowline.sidx")
 
-    ######### Process Dams
-    for HUC2 in REGION_GROUPS[group]:
-        print("Reading dams in {}".format(HUC2))
+    print("Snapping dams")
+    dams = snap_to_line(dams, flowlines, SNAP_TOLERANCE, sindex=sindex)
+    print("{} dams were successfully snapped".format(len(dams)))
 
-        # Read in manually snapped dams
-        dams = gp.read_file("{0}/snapped_dams/dams{1}qa.shp".format(src_dir, HUC2))
-        dams["HUC2"] = HUC2
-        dams["joinID"] = dams.AnalysisID
+    if snapped is None:
+        snapped = dams
 
-        # Note: this includes some dams that shouldn't snap (>200 m) but were accidentally included in those sent out for
-        # manual snapping.  Remove them.
-        dams = dams.loc[~(dams.NHDPlusID.isnull() | (dams.NHDPlusID == 0))]
+    else:
+        snapped = snapped.append(dams, sort=False, ignore_index=True)
 
-        # manually snapped dams have had some dams removed, so expect this not to match perfectly with QA
-        # remove any that are marked with a SNAP2018 of 5, 6, 7 (manually determined NOT on network)
-        # remove any dams that are marked with a SNAP2018 of 8 (dam was removed for conservation)
-        dams = dams.loc[~dams.SNAP2018.isin([5, 6, 7, 8])]
 
-        print("Selected {0} valid dams within region".format(len(dams)))
-
-        dams = dams[["joinID", "AnalysisID", "HUC2", "geometry"]].copy()
-
-        print("Snapping dams")
-        sidx = "flowline.sidx"
-        dams = snap_to_line(dams, flowlines, SNAP_TOLERANCE, sindex=sindex)
-        print("{} dams were successfully snapped".format(len(dams)))
-
-        if snapped is None:
-            snapped = dams
-
-        else:
-            snapped = snapped.append(dams, sort=False, ignore_index=True)
-
+print("\n--------------\n")
 print("Serializing {0} snapped dams".format(len(snapped)))
-serialize_gdf(snapped, "{}/snapped_dams.feather".format(src_dir), index=False)
+serialize_gdf(snapped, out_dir / "snapped_dams.feather", index=False)
+print("Done in {:.2f}".format(time() - start))
+
+
+if QA:
+    # Write out those that didn't snap for QA
+    print("writing shapefiles for QA/QC")
+
+    to_shp(orig_df.loc[~orig_df.dropped.isnull()], qa_dir / "dropped_dams.shp")
+
+    to_shp(snapped, qa_dir / "snapped_dams.shp")
+    to_shp(
+        all_dams.loc[~all_dams.joinID.isin(snapped.joinID)],
+        qa_dir / "unsnapped_dams.shp",
+    )
 

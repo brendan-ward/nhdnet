@@ -31,6 +31,9 @@ REGION_GROUPS = {
 # By default, barriers are snapped automatically only if within this distance
 SNAP_TOLERANCE = 100  # meters
 
+# All barriers that are within 10 meters of each other are reduced to the first one
+DUPLICATE_TOLERANCE = 10  # meters
+
 # Use USGS CONUS Albers (EPSG:102003): https://epsg.io/102003    (same as other SARP datasets)
 # use Proj4 syntax, since GeoPandas doesn't properly recognize it's EPSG Code.
 CRS = "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
@@ -47,3 +50,25 @@ BARRIER_COLUMNS = [
     "nearby",
     "kind",
 ]
+
+# Used to filter small barriers by Potential_Project, based on guidance from Kat
+KEEP_POTENTIAL_PROJECT = [
+    "Severe Barrier",
+    "Moderate Barrier",
+    "Inaccessible",
+    "Significant Barrier",
+    "No Upstream Channel",
+    "Indeterminate",
+    "Potential Project",
+    "Proposed Project",
+]
+
+
+# Used to filter small barriers and dams by SNAP2018, based on guidance from Kat
+# Note: dropped barriers are still shown on the map, but not included in the network analysis
+# Note: 0 value indicates N/A
+DROP_SNAP2018 = [5, 6, 7, 8, 9, 10]
+
+# Used to filter dams by PotentialFeasibility
+# based on guidance from Kat
+DROP_FEASIBILITY = [7, 16, 19]
