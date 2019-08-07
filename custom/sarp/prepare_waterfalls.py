@@ -103,12 +103,11 @@ for group in REGION_GROUPS:
 
 
 # Remove duplicates after snapping, in case any snapped to the same position
-serialize_gdf(snapped, qa_dir / "snapped_waterfalls_pre_dedup.feather", index=False)
 dedup = remove_duplicates(snapped, DUPLICATE_TOLERANCE)
 
 if QA:
     dup = snapped.loc[~snapped.joinID.isin(dedup.joinID)]
-    print("Removed {} duplicates after snapping".format(len(dup) ))
+    print("Removed {} duplicates after snapping".format(len(dup)))
 
     orig_df.loc[
         orig_df.joinID.isin(dup.joinID), "dropped"

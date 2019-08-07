@@ -3,6 +3,7 @@
 Run this after preparing NHD data for the region group identified below.
 
 """
+from pathlib import Path
 import os
 from time import time
 
@@ -28,80 +29,99 @@ from stats import calculate_network_stats
 ### START Runtime variables
 # These should be the only variables that need to be changed at runtime
 
-RESUME = False
+QA = True
+# Set to True to store intermediate files for QA / QC
+
+# RESUME = False
 # Set to True to re-use previously calculated intermediate files.  This can save time when debugging later steps.
 
-SMALL_BARRIERS = True
+# mode determines the type of network analysis we are doing
+# natural: only include waterfalls in analysis
+# dams: include waterfalls and dams in analysis
+# small_barriers: include waterfalls, dams, and small barriers in analysis
+MODES = ("natural", "dams", "small_barriers")
+mode = MODES[1]  # TODO: document
+
+# SMALL_BARRIERS = True
 # Set to True when you want to include small barriers in the analysis.  When included, small barriers are treated as HARD barriers. and WILL affect the results for dams.
 
-group = "07_10"  # Identifier of region group or region
+group = "03"  # Identifier of region group or region
 
 ### END Runtime variables
 
-
-src_dir = "/Users/bcward/projects/data/sarp"
-working_dir = "{0}/nhd/region/{1}".format(src_dir, group)
-os.chdir(working_dir)
-
+data_dir = Path("../data/sarp/")
+nhd_dir = data_dir / "derived/nhd/region"
+inputs_dir = data_dir / "derived/inputs"
+qa_dir = data_dir / "qa"
+base_out_dir = data_dir / "derived/outputs"
 
 # INPUT files from merge.py
-flowline_feather = "flowline.feather"
-joins_feather = "flowline_joins.feather"
+flowline_feather = nhd_dir / group / "flowline.feather"
+joins_feather = nhd_dir / group / "flowline_joins.feather"
 
 # INPUT files from prepare_floodplain_stats.py
-fp_feather = "{}/floodplain_stats.feather".format(src_dir)
+fp_feather = inputs_dir / "floodplain_stats.feather"
 
 # INPUT files from prepare_dams.py, prepare_waterfalls.py, prepare_small_barriers.py
-dams_feather = "{}/snapped_dams.feather".format(src_dir)
-waterfalls_feather = "{}/snapped_waterfalls.feather".format(src_dir)
-small_barriers_feather = "{}/snapped_small_barriers.feather".format(src_dir)
+dams_feather = inputs_dir / "snapped_dams.feather"
+waterfalls_feather = inputs_dir / "snapped_waterfalls.feather"
+small_barriers_feather = inputs_dir / "snapped_small_barriers.feather"
 
-
-suffix = "small_barriers" if SMALL_BARRIERS else "dams"
-
-# INTERMEDIATE files
-barrier_feather = "barriers_{}.feather".format(suffix)
-split_flowline_feather = "split_flowlines_{}.feather".format(suffix)
-updated_joins_feather = "updated_joins_{}.feather".format(suffix)
-barrier_joins_feather = "barrier_joins_{}.feather".format(suffix)
-network_feather = "network_{}.feather".format(suffix)
-network_segments_feather = "network_segments_{}.feather".format(suffix)
 
 # OUTPUT files
-network_stats_csv = "network_stats_{}.csv".format(suffix)
-barrier_network_csv = "barriers_network_{}.csv".format(suffix)
+out_dir = base_out_dir / group / mode
+if not os.path.exists(out_dir):
+    os.makedirs(out_dir)
 
+# INTERMEDIATE files
+# TODO: only if QA == True?
+intermediate_dir = out_dir / "intermediate"
+if not os.path.exists(intermediate_dir):
+    os.makedirs(intermediate_dir)
+
+barrier_feather = intermediate_dir / "barriers.feather"
+split_flowline_feather = intermediate_dir / "split_flowlines.feather"
+updated_joins_feather = intermediate_dir / "updated_joins_{}.feather"
+barrier_joins_feather = intermediate_dir / "barrier_joins_{}.feather"
+network_segments_feather = intermediate_dir / "network_segments.feather"
+
+# FINAL OUTPUT files
+network_feather = out_dir / "network.feather"
+network_stats_csv = out_dir / "network_stats.csv"
+barrier_network_csv = out_dir / "barriers_network.csv"
+
+
+#### Start
+print("Processing network analysis for {} in regions {}".format(mode, group))
 
 start = time()
 
 ##################### Read NHD data #################
-print("------------------- Reading Flowlines -----------")
-print("reading flowlines")
-flowlines = deserialize_gdf(flowline_feather).set_index("lineID", drop=False)
-print("read {} flowlines".format(len(flowlines)))
 
 print("------------------- Preparing barriers ----------")
 barrier_start = time()
-dams = deserialize_gdf(dams_feather)
-dams["kind"] = "dam"
 
-# TODO: will be handled in prepare_dams.py
-dams["HUC2"] = dams.HUC4.str[:2]
-
-dams = dams.loc[dams.HUC2.isin(REGION_GROUPS[group])].copy()
-print("Selected {} dams".format(len(dams)))
-
+print("Reading waterfalls")
 wf = deserialize_gdf(waterfalls_feather)
 wf["kind"] = "waterfall"
-wf["AnalysisID"] = ""
-wf = wf.loc[wf.HUC2.isin(REGION_GROUPS[group])].copy()
+# wf["AnalysisID"] = ""  # FIXME
+wf = wf.loc[wf.HUC2.isin(REGION_GROUPS[group])][BARRIER_COLUMNS].copy()
 print("Selected {} waterfalls".format(len(wf)))
 
-barriers = dams[BARRIER_COLUMNS].append(
-    wf[BARRIER_COLUMNS], ignore_index=True, sort=False
-)
+barriers = wf
 
-if SMALL_BARRIERS:
+if mode != "natural":
+    print("Reading dams")
+    dams = deserialize_gdf(dams_feather)
+    dams["kind"] = "dam"
+    dams = dams.loc[dams.HUC2.isin(REGION_GROUPS[group])][BARRIER_COLUMNS].copy()
+    print("Selected {} dams".format(len(dams)))
+
+    if len(dams):
+        barriers = barriers.append(dams, ignore_index=True, sort=False)
+
+if mode == "small_barriers":
+    print("Reading small barriers")
     sb = deserialize_gdf(small_barriers_feather)
     sb["kind"] = "small_barrier"
     sb = sb.loc[sb.HUC2.isin(REGION_GROUPS[group])].copy()
@@ -110,58 +130,70 @@ if SMALL_BARRIERS:
     if len(sb):
         barriers = barriers.append(sb[BARRIER_COLUMNS], ignore_index=True, sort=False)
 
+# TODO: replace with correct joinID derived from SARP provided values (currently missing values for some records)
+barriers.joinID = barriers.kind + barriers.joinID.astype("str")
+
 barriers.set_index("joinID", inplace=True, drop=False)
 
+# Check for duplicates between barrier types
 print("Checking for duplicates")
 wkt = barriers[["joinID", "geometry"]].copy()
 wkt["point"] = wkt.geometry.apply(lambda g: g.to_wkt())
 barriers = barriers.loc[wkt.drop_duplicates("point").index]
 print("Removed {} duplicate locations".format(len(wkt) - len(barriers)))
 
-print("serializing barriers")
-# barriers in original but not here are dropped due to likely duplication
-serialize_gdf(barriers, barrier_feather, index=False)
-tmp = barriers.copy()
-tmp.NHDPlusID = tmp.NHDPlusID.astype("float64")
-to_shp(tmp, barrier_feather.replace(".feather", ".shp"))
+if QA:
+    print("serializing barriers")
+    # barriers in original but not here are dropped due to likely duplication
+    serialize_gdf(barriers, barrier_feather, index=False)
+    tmp = barriers.copy()
+    tmp.NHDPlusID = tmp.NHDPlusID.astype("float64")
+    to_shp(tmp, str(barrier_feather).replace(".feather", ".shp"))
 
 print("Done preparing barriers in {:.2f}s".format(time() - barrier_start))
 
 
+print("------------------- Reading Flowlines -----------")
+print("reading flowlines")
+flowlines = deserialize_gdf(flowline_feather).set_index("lineID", drop=False)
+print("read {} flowlines".format(len(flowlines)))
+
+
 ##################### Cut flowlines #################
-if RESUME and os.path.exists(split_flowline_feather):
-    print("reading cut segments and joins")
+# if RESUME and os.path.exists(split_flowline_feather):
+#     print("reading cut segments and joins")
 
-    flowlines = deserialize_gdf(split_flowline_feather).set_index("lineID", drop=False)
-    joins = deserialize_df(updated_joins_feather)
-    barrier_joins = deserialize_df(barrier_joins_feather).set_index(
-        "joinID", drop=False
-    )
+#     flowlines = deserialize_gdf(split_flowline_feather).set_index("lineID", drop=False)
+#     joins = deserialize_df(updated_joins_feather)
+#     barrier_joins = deserialize_df(barrier_joins_feather).set_index(
+#         "joinID", drop=False
+#     )
 
-else:
-    cut_start = time()
-    print("------------------- Cutting flowlines -----------")
-    print("Starting from {} original segments".format(len(flowlines)))
+# else:
+cut_start = time()
+print("------------------- Cutting flowlines -----------")
+print("Starting from {} original segments".format(len(flowlines)))
 
-    joins = deserialize_df(joins_feather)
-    # since all other lineIDs use HUC4 prefixes, this should be unique
-    # Use the first HUC2 for the region group
-    next_segment_id = int(REGION_GROUPS[group][0]) * 1000000 + 1
-    flowlines, joins, barrier_joins = cut_flowlines(
-        flowlines, barriers, joins, next_segment_id=next_segment_id
-    )
-    print("Done cutting in {:.2f}".format(time() - cut_start))
+joins = deserialize_df(joins_feather)
+# since all other lineIDs use HUC4 prefixes, this should be unique
+# Use the first HUC2 for the region group
+next_segment_id = int(REGION_GROUPS[group][0]) * 1000000 + 1
+flowlines, joins, barrier_joins = cut_flowlines(
+    flowlines, barriers, joins, next_segment_id=next_segment_id
+)
+barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
+barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
+barrier_joins.set_index("joinID", drop=False)
 
-    print("serializing cut geoms")
+print("Done cutting flowlines in {:.2f}".format(time() - cut_start))
 
-    barrier_joins.upstream_id = barrier_joins.upstream_id.astype("uint32")
-    barrier_joins.downstream_id = barrier_joins.downstream_id.astype("uint32")
-    barrier_joins.set_index("joinID", drop=False)
+if QA:
+    print("serializing cut flowlines")
     serialize_df(joins, updated_joins_feather, index=False)
     serialize_df(barrier_joins, barrier_joins_feather, index=False)
     serialize_gdf(flowlines, split_flowline_feather, index=False)
 
-    print("Done serializing cuts in {:.2f}".format(time() - cut_start))
+    print("Done serializing cut flowlines in {:.2f}".format(time() - cut_start))
 
 
 ##################### Create networks #################
@@ -214,7 +246,9 @@ print(
     )
 )
 
-serialize_gdf(network_df, network_segments_feather, index=False)
+if QA:
+    print("Serializing network segments")
+    serialize_gdf(network_df, network_segments_feather, index=False)
 
 
 ##################### Network stats #################
@@ -300,7 +334,7 @@ print("Network dissolve done in {0:.2f}".format(time() - dissolve_start))
 
 print("Writing dissolved network shapefile")
 serialize_gdf(networks, network_feather, index=False)
-to_shp(networks, network_feather.replace(".feather", ".shp"))
+to_shp(networks, str(network_feather).replace(".feather", ".shp"))
 
 print("All done in {:.2f}".format(time() - start))
 

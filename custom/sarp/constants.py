@@ -44,7 +44,7 @@ BARRIER_COLUMNS = [
     "lineID",
     "NHDPlusID",
     "joinID",
-    "AnalysisID",
+    # "AnalysisID",
     "geometry",
     "snap_dist",
     "nearby",
