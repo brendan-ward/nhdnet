@@ -11,8 +11,14 @@ import geopandas as gp
 
 from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex, to_shp
 from nhdnet.geometry.lines import snap_to_line
+from nhdnet.geometry.points import remove_duplicates
 
-from constants import REGION_GROUPS, REGIONS, CRS, SNAP_TOLERANCE
+from constants import REGION_GROUPS, REGIONS, CRS, SNAP_TOLERANCE, DUPLICATE_TOLERANCE
+
+
+QA = True
+# Set to True to output shapefiles for QA/QC
+
 
 data_dir = Path("../data/sarp/")
 nhd_dir = data_dir / "derived/nhd/region"
@@ -31,8 +37,15 @@ all_wf = gp.read_file(sarp_dir / gdb_filename)[
 
 all_wf["joinID"] = all_wf.index.astype("uint")
 
+if QA:
+    orig_df = all_wf.copy()
+
+
 ### Drop records with bad coordinates
 all_wf = all_wf.loc[all_wf.geometry.y.abs() <= 90]
+
+if QA:
+    orig_df.loc[orig_df.geometry.y.abs() > 90, "dropped"] = "bad coordinates"
 
 ### Cleanup data
 all_wf.Source = all_wf.Source.str.strip()
@@ -88,15 +101,32 @@ for group in REGION_GROUPS:
     else:
         snapped = snapped.append(wf, sort=False, ignore_index=True)
 
+
+# Remove duplicates after snapping, in case any snapped to the same position
+serialize_gdf(snapped, qa_dir / "snapped_waterfalls_pre_dedup.feather", index=False)
+dedup = remove_duplicates(snapped, DUPLICATE_TOLERANCE)
+
+if QA:
+    dup = snapped.loc[~snapped.joinID.isin(dedup.joinID)]
+    print("Removed {} duplicates after snapping".format(len(dup) ))
+
+    orig_df.loc[
+        orig_df.joinID.isin(dup.joinID), "dropped"
+    ] = "drop duplicate after snapping"
+
+snapped = dedup
+
 print("\n--------------\n")
 print("Serializing {0} snapped waterfalls out of {1}".format(len(snapped), len(all_wf)))
 serialize_gdf(snapped, out_dir / "snapped_waterfalls.feather", index=False)
 
 
-# Write out those that didn't snap for QA
-print("writing shapefiles for QA/QC")
-to_shp(snapped, qa_dir / "snapped_waterfalls.shp")
+if QA:
+    to_shp(orig_df.loc[~orig_df.dropped.isnull()], qa_dir / "dropped_waterfalls.shp")
+    # Write out those that didn't snap for QA
+    print("writing shapefiles for QA/QC")
+    to_shp(snapped, qa_dir / "snapped_waterfalls.shp")
 
-unsnapped = all_wf.loc[~all_wf.joinID.isin(snapped.joinID)]
-to_shp(unsnapped, qa_dir / "unsnapped_waterfalls.shp")
+    unsnapped = all_wf.loc[~all_wf.joinID.isin(snapped.joinID)]
+    to_shp(unsnapped, qa_dir / "unsnapped_waterfalls.shp")
 

@@ -27,6 +27,7 @@ from constants import (
 
 
 QA = True
+# Set to True to output shapefiles for QA/QC
 
 
 data_dir = Path("../data/sarp/")
@@ -45,6 +46,11 @@ all_sb = gp.read_file(sarp_dir / barriers_filename).rename(
 
 print("Read {} small barriers".format(len(all_sb)))
 
+# TODO: use AnalysisID once that is fixed
+all_sb["joinID"] = all_sb.index.astype("uint")
+# all_sb["joinID"] = all_sb.AnalysisID
+
+
 if QA:
     orig_df = all_sb.copy()
 
@@ -55,7 +61,7 @@ if QA:
 all_sb = all_sb.loc[
     all_sb.Potential_Project.isin(KEEP_POTENTIAL_PROJECT)
     & ~all_sb.SNAP2018.isin(DROP_SNAP2018)
-][["AnalysisID", "HUC12", "geometry"]].to_crs(CRS)
+][["joinID", "HUC12", "geometry"]].to_crs(CRS)
 print("{} small barriers left after filtering".format(len(all_sb)))
 
 if QA:
@@ -71,7 +77,6 @@ if QA:
         ~orig_df.index.isin(all_sb.index) & orig_df.dropped.isnull(), "dropped"
     ] = "drop duplicate"
 
-all_sb["joinID"] = all_sb.AnalysisID
 
 # NOTE: these currently include HUC12, which we use for deriving HUC2
 # Long term, this may need to be replaced with a spatial join here
@@ -106,6 +111,21 @@ for group in REGION_GROUPS:
             snapped = sb
         else:
             snapped = snapped.append(sb, sort=False, ignore_index=True)
+
+
+# Remove duplicates after snapping, in case any snapped to the same position
+dedup = remove_duplicates(snapped, DUPLICATE_TOLERANCE)
+
+if QA:
+    dup = snapped.loc[~snapped.joinID.isin(dedup.joinID)]
+    print("Removed {} duplicates after snapping".format(len(dup)))
+
+    orig_df.loc[
+        orig_df.joinID.isin(dup.joinID), "dropped"
+    ] = "drop duplicate after snapping"
+
+snapped = dedup
+
 
 print("\n--------------\n")
 print("Serializing {0} snapped barriers out of {1}".format(len(snapped), len(all_sb)))

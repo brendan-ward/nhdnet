@@ -42,6 +42,11 @@ start = time()
 all_dams = gp.read_file(sarp_dir / dams_filename)
 print("Read {} dams".format(len(all_dams)))
 
+# TODO: use AnalysisID once that is fixed
+all_dams["joinID"] = all_dams.index.astype("uint")
+# all_dams["joinID"] = all_dams.AnalysisID
+
+
 if QA:
     orig_df = all_dams.copy()
 
@@ -61,7 +66,7 @@ all_dams = all_dams.loc[
         all_dams.Snap2018.isin(DROP_SNAP2018)
         | all_dams.PotentialFeasibility.isin(DROP_FEASIBILITY)
     )
-][["AnalysisID", "HUC12", "geometry"]].to_crs(CRS)
+][["joinID", "HUC12", "geometry"]].to_crs(CRS)
 print("{} dams left after filtering".format(len(all_dams)))
 
 if QA:
@@ -77,9 +82,7 @@ if QA:
     ] = "drop duplicate"
 
 
-all_dams["joinID"] = all_dams.AnalysisID
-
-# NOTE: these currently include HUC12, which we use for deriving HUC2
+# NOTE: these data currently include HUC12, which we use for deriving HUC2
 # Long term, this may need to be replaced with a spatial join here
 all_dams["HUC2"] = all_dams.HUC12.str[:2]
 
@@ -114,11 +117,24 @@ for group in REGION_GROUPS:
         snapped = snapped.append(dams, sort=False, ignore_index=True)
 
 
+# Remove duplicates after snapping, in case any snapped to the same position
+dedup = remove_duplicates(snapped, DUPLICATE_TOLERANCE)
+
+if QA:
+    dup = snapped.loc[~snapped.joinID.isin(dedup.joinID)]
+    print("Removed {} duplicates after snapping".format(len(dup)))
+
+    orig_df.loc[
+        orig_df.joinID.isin(dup.joinID), "dropped"
+    ] = "drop duplicate after snapping"
+
+snapped = dedup
+
+
 print("\n--------------\n")
 print("Serializing {0} snapped dams".format(len(snapped)))
 serialize_gdf(snapped, out_dir / "snapped_dams.feather", index=False)
 print("Done in {:.2f}".format(time() - start))
-
 
 if QA:
     # Write out those that didn't snap for QA

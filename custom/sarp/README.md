@@ -69,6 +69,8 @@ At this point, manual snapping and QA is required in order to ensure that barrie
 
 The above steps only need to be performed when there are updated data for each type of barrier.
 
+In any of the files above, you can set `QA = True` to output additional shapefiles for QA/QC, such as barriers that are dropped due to duplicates or those that didn't snap to the network.
+
 ### Prepare floodplain metrics
 
 The amount of natural landcover in the floodplain of each aquatic network helps to measure the overall habitat quality of that network, and helps prioritize those barriers that if removed would contribute high quality upstream networks. In order to streamline processing for barrier inventories that growy over time, we approximated the natural landcover at the catchment level, so that floodplain statistics could be reused for many analyses rather than regenerated each time a new barrier is added to the inventory.
