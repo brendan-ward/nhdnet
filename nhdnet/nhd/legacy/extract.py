@@ -1,40 +1,18 @@
-"""Extract NHD data to simpler data formats for later processing
+"""Process Medium resolution NHD data.
 
-Run this first!
-
-1. Read NHDFlowline and convert to 2D lines
-2. Join to VAA and bring in select attributes
-2. Project to USGS CONUS Albers (transient geom)
-3. Calculate sinuosity and length
-4. Write to shapefile
-5. Write to CSV
-
-Note: NHDPlusIDs are converted to uint64 for internal processing. 
-These need to be converted back to float64 for use in shapefiles and such
-
-TODO: add other attributes to keep throughout, including size info for plotting
-
-If a HUC4 raises an invalid geometry error when trying to read it, use ogr2ogr to convert it first:
-ogr2ogr -f "ESRI Shapefile" NHDFlowline.shp  NHDPLUS_H_0601_HU4_GDB.gdb NHDFlowline
+Reference: https://prd-wret.s3-us-west-2.amazonaws.com/assets/palladium/production/s3fs-public/atoms/files/NHDv2.2.1_poster_081216.pdf
 
 """
 
-import os
 import geopandas as gp
-import pandas as pd
-from shapely.geometry import MultiLineString
-from nhdnet.geometry.lines import to2D, calculate_sinuosity
 
 
-FLOWLINE_COLS = ["NHDPlusID", "FlowDir", "FType", "GNIS_ID", "GNIS_Name", "geometry"]
-
-# TODO: add elevation gradient info
-VAA_COLS = ["NHDPlusID", "StreamOrde", "StreamCalc", "TotDASqKm"]
+from nhdnet.nhd.extract import FLOWLINE_COLS, VAA_COLS
 
 
-def extract_flowlines(gdb_path, target_crs):
+def extract_flowlines_mr(gdb_path, target_crs):
     """
-    Extracts data from NHDPlusHR data product.
+    Extracts data from NHDPlus Medium Resolution data product.
     Extract flowlines, join to VAA table, and filter out any loops and coastlines.
     Extract joins between flowlines, and filter out any loops and coastlines.
     
@@ -54,14 +32,16 @@ def extract_flowlines(gdb_path, target_crs):
     # Read in data and convert to data frame (no need for geometry)
     print("Reading flowlines")
 
-    df = gp.read_file(gdb_path, layer="NHDFlowline")[FLOWLINE_COLS]
+    # WARNING: this NHDPlusID is not equivalent to that used by high resolution
+    df = gp.read_file(gdb_path, layer="NHDFlowline").rename(
+        columns={"Permanent_Identifier": "NHDPlusID"}
+    )
 
+    df = df[FLOWLINE_COLS]
     # Set our internal master IDs to the original index of the file we start from
     # Assume that we can always fit into a uint32, which is ~400 million records
     # and probably bigger than anything we could ever read in
     df["lineID"] = df.index.values.astype("uint32") + 1
-    # Index on NHDPlusID for easy joins to other NHD data
-    df.NHDPlusID = df.NHDPlusID.astype("uint64")
     df = df.set_index(["NHDPlusID"], drop=False)
 
     print("Read {} flowlines".format(len(df)))
@@ -69,8 +49,9 @@ def extract_flowlines(gdb_path, target_crs):
     # Read in VAA and convert to data frame
     # NOTE: not all records in Flowlines have corresponding records in VAA
     print("Reading VAA table and joining...")
-    vaa_df = gp.read_file(gdb_path, layer="NHDPlusFlowlineVAA")[VAA_COLS]
-    vaa_df.NHDPlusID = vaa_df.NHDPlusID.astype("uint64")
+    vaa_df = gp.read_file(gdb_path, layer="NHDFlowlineVAA").rename(
+        columns={"Permanent_Identifier": "NHDPlusID", "StreamOrder": "StreamOrde"}
+    )[VAA_COLS]
     vaa_df = vaa_df.set_index(["NHDPlusID"])
     df = df.join(vaa_df, how="inner")
     print("{} features after join to VAA".format(len(df)))
@@ -78,9 +59,8 @@ def extract_flowlines(gdb_path, target_crs):
     # Filter out loops (query came from Kat) and other segments we don't want.
     # 566 is coastlines type.
     print("Filtering out loops and coastlines")
-    removed = df.loc[
-        (df.StreamOrde != df.StreamCalc) | (df.FlowDir.isnull()) | (df.FType == 566)
-    ]
+    # (df.StreamOrde != df.StreamCalc)
+    removed = df.loc[(df.FlowDir.isnull()) | (df.FType == 566)]
     df = df.loc[~df.index.isin(removed.index)].copy()
     print("{} features after removing loops and coastlines".format(len(df)))
 
@@ -119,11 +99,12 @@ def extract_flowlines(gdb_path, target_crs):
 
     ############# Connections between segments ###################
     print("Reading segment connections")
-    join_df = gp.read_file(gdb_path, layer="NHDPlusFlow")[
-        ["FromNHDPID", "ToNHDPID"]
-    ].rename(columns={"FromNHDPID": "upstream", "ToNHDPID": "downstream"})
-    join_df.upstream = join_df.upstream.astype("uint64")
-    join_df.downstream = join_df.downstream.astype("uint64")
+    join_df = gp.read_file(gdb_path, layer="NHDFlow").rename(
+        columns={
+            "From_Permanent_Identifier": "upstream",
+            "To_Permanent_Identifier": "downstream",
+        }
+    )[["upstream", "downstream"]]
 
     # remove any joins to or from segments we removed above
     join_df = join_df.loc[
@@ -150,8 +131,4 @@ def extract_flowlines(gdb_path, target_crs):
     join_df.loc[join_df.downstream == 0, "type"] = "terminal"
     join_df.loc[(join_df.upstream != 0) & (join_df.upstream_id == 0), "type"] = "huc_in"
 
-    # Note: this doesn't seem to be working, because outflowing rivers are coded as 0 by NHD
-    # join_df.loc[(join_df.downstream != 0) & (join_df.downstream_id == 0), 'type'] = 'huc_out'
-
     return df, join_df
-

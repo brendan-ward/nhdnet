@@ -10,6 +10,7 @@ from pathlib import Path
 from time import time
 import pandas as pd
 import geopandas as gp
+import numpy as np
 
 from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex, to_shp
 from nhdnet.geometry.lines import snap_to_line
@@ -22,7 +23,9 @@ from constants import (
     SNAP_TOLERANCE,
     DUPLICATE_TOLERANCE,
     DROP_SNAP2018,
+    EXCLUDE_SNAP2018,
     DROP_FEASIBILITY,
+    EXCLUDE_FEASIBILITY,
 )
 
 
@@ -42,13 +45,22 @@ start = time()
 all_dams = gp.read_file(sarp_dir / dams_filename)
 print("Read {} dams".format(len(all_dams)))
 
-# TODO: use AnalysisID once that is fixed
+
 all_dams["joinID"] = all_dams.index.astype("uint")
-# all_dams["joinID"] = all_dams.AnalysisID
+
+# NOTE: these data currently include HUC12, which we use for deriving HUC2
+# Long term, this may need to be replaced with a spatial join here
+all_dams["HUC2"] = all_dams.HUC12.str[:2]
 
 
 if QA:
-    orig_df = all_dams.copy()
+    qa_df = all_dams.copy()
+    qa_df["dropped"] = np.nan
+
+### Add tracking fields
+all_dams["networkAnalysis"] = False
+all_dams["snapped"] = False
+
 
 ### Cleanup data
 all_dams.Snap2018 = all_dams.Snap2018.fillna(0).astype("uint8")
@@ -60,33 +72,57 @@ all_dams.Recon = all_dams.Recon.fillna(0).astype("uint8")
 all_dams.loc[all_dams.Recon == 16, "Snap2018"] = 10
 
 
-### Filter out dams by Snap2018 and PotentialFeasibility
-all_dams = all_dams.loc[
-    ~(
-        all_dams.Snap2018.isin(DROP_SNAP2018)
-        | all_dams.PotentialFeasibility.isin(DROP_FEASIBILITY)
-    )
-][["joinID", "HUC12", "geometry"]].to_crs(CRS)
-print("{} dams left after filtering".format(len(all_dams)))
+### Filter out any dams that should be completely dropped from analysis
+drop_idx = all_dams.PotentialFeasibility.isin(
+    DROP_FEASIBILITY
+) | all_dams.Snap2018.isin(DROP_SNAP2018)
+
+print(
+    "Dropped {} dams from all analysis and mapping".format(len(all_dams.loc[drop_idx]))
+)
+all_dams = all_dams.loc[~drop_idx].copy()
 
 if QA:
-    orig_df.loc[~orig_df.index.isin(all_dams.index), "dropped"] = "drop SNAP2018"
+    qa_df.loc[
+        ~qa_df.joinID.isin(all_dams.joinID), "dropped"
+    ] = "drop Snap2018 / PotentialFeasibility"
+
+
+### Exclude dams that should not be analyzed or prioritized
+exclude_idx = all_dams.Snap2018.isin(
+    EXCLUDE_SNAP2018
+) | all_dams.PotentialFeasibility.isin(EXCLUDE_FEASIBILITY)
+
+all_dams.loc[~exclude_idx, "networkAnalysis"] = True
+print(
+    "Excluded {} dams from network analysis and prioritization".format(
+        len(all_dams.loc[exclude_idx])
+    )
+)
+
+if QA:
+    qa_df.loc[
+        qa_df.joinID.isin(all_dams.loc[exclude_idx].joinID) & qa_df.dropped.isnull(),
+        "dropped",
+    ] = "exclude Snap2018 / PotentialFeasibility"
+
+
+### Project to CRS
+all_dams = all_dams.to_crs(CRS)
+
 
 ### Remove duplicates (within DUPLICATE_TOLERANCE)
 all_dams = remove_duplicates(all_dams, DUPLICATE_TOLERANCE)
 print("{} dams left after removing duplicates".format(len(all_dams)))
 
 if QA:
-    orig_df.loc[
-        ~orig_df.index.isin(all_dams.index) & orig_df.dropped.isnull(), "dropped"
+    qa_df.loc[
+        ~qa_df.joinID.isin(all_dams.joinID) & qa_df.dropped.isnull(), "dropped"
     ] = "drop duplicate"
 
 
-# NOTE: these data currently include HUC12, which we use for deriving HUC2
-# Long term, this may need to be replaced with a spatial join here
-all_dams["HUC2"] = all_dams.HUC12.str[:2]
-
-
+### Snap by region group
+to_snap = all_dams.loc[all_dams.networkAnalysis, ["joinID", "geometry"]].copy()
 snapped = None
 
 for group in REGION_GROUPS:
@@ -94,8 +130,8 @@ for group in REGION_GROUPS:
 
     region_dir = nhd_dir / group
 
-    dams = all_dams.loc[all_dams.HUC2.isin(REGION_GROUPS[group])].copy()
-    print("Selected {0} small barriers in region {1}".format(len(dams), group))
+    dams = to_snap.loc[all_dams.HUC2.isin(REGION_GROUPS[group])].copy()
+    print("Selected {0} dams in region {1}".format(len(dams), group))
 
     print("Reading flowlines")
     flowlines = deserialize_gdf(region_dir / "flowline.feather").set_index(
@@ -124,27 +160,43 @@ if QA:
     dup = snapped.loc[~snapped.joinID.isin(dedup.joinID)]
     print("Removed {} duplicates after snapping".format(len(dup)))
 
-    orig_df.loc[
-        orig_df.joinID.isin(dup.joinID), "dropped"
+    qa_df.loc[
+        qa_df.joinID.isin(dup.joinID), "dropped"
     ] = "drop duplicate after snapping"
 
 snapped = dedup
 
 
+### Update snapped geometry into master
+all_dams = (
+    all_dams.drop(columns=["networkAnalysis"])
+    .set_index("joinID")
+    .join(
+        snapped.set_index("joinID")[
+            ["geometry", "lineID", "NHDPlusID", "snap_dist", "nearby"]
+        ],
+        rsuffix="_snapped",
+    )
+    .reset_index()
+)
+idx = ~all_dams.geometry_snapped.isnull()
+all_dams.loc[idx, "geometry"] = all_dams.loc[idx].geometry_snapped
+all_dams.loc[idx, "snapped"] = True
+all_dams = all_dams.drop(columns=["geometry_snapped"])
+
+
 print("\n--------------\n")
-print("Serializing {0} snapped dams".format(len(snapped)))
-serialize_gdf(snapped, out_dir / "snapped_dams.feather", index=False)
-print("Done in {:.2f}".format(time() - start))
+print(
+    "Serializing {0} snapped dams out of {1}".format(
+        len(all_dams.loc[all_dams.snapped]), len(all_dams)
+    )
+)
+serialize_gdf(all_dams, out_dir / "dams.feather", index=False)
 
 if QA:
-    # Write out those that didn't snap for QA
     print("writing shapefiles for QA/QC")
+    to_shp(all_dams, qa_dir / "dams.shp")
 
-    to_shp(orig_df.loc[~orig_df.dropped.isnull()], qa_dir / "dropped_dams.shp")
-
-    to_shp(snapped, qa_dir / "snapped_dams.shp")
-    to_shp(
-        all_dams.loc[~all_dams.joinID.isin(snapped.joinID)],
-        qa_dir / "unsnapped_dams.shp",
-    )
+    # write out any that were dropped by the analysis
+    to_shp(qa_df.loc[~qa_df.dropped.isnull()], qa_dir / "dropped_dams.shp")
 

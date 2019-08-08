@@ -8,6 +8,8 @@ REGIONS = {
     "05": [5, 7, 9, 10, 11, 13, 14],
     "06": list(range(1, 5)),
     "07": [10, 11, 14],
+    # 08 is a special case; it is medium resolution until beta high resolution version is posted
+    # "08": list(range(1, 10)),
     "10": [24, 28, 29, 30],
     "11": [1, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
     "12": list(range(1, 12)),
@@ -23,6 +25,8 @@ REGION_GROUPS = {
     "03": ["03"],
     "05_06": ["05", "06"],
     "07_10": ["07", "10"],
+    # 08 is a special case; it is medium resolution until beta high resolution version is posted
+    # "08": ["08"],
     "11": ["11"],
     "12": ["12"],
     "13": ["13"],
@@ -44,14 +48,14 @@ BARRIER_COLUMNS = [
     "lineID",
     "NHDPlusID",
     "joinID",
-    # "AnalysisID",
     "geometry",
     "snap_dist",
     "nearby",
     "kind",
 ]
 
-# Used to filter small barriers by Potential_Project, based on guidance from Kat
+# Used to filter small barriers by Potential_Project (small barriers)
+# based on guidance from Kat
 KEEP_POTENTIAL_PROJECT = [
     "Severe Barrier",
     "Moderate Barrier",
@@ -63,12 +67,22 @@ KEEP_POTENTIAL_PROJECT = [
     "Proposed Project",
 ]
 
+# Used to filter Potential_Project (small barriers)
+# These are DROPPED from all analysis and mapping
+DROP_POTENTIAL_PROJECT = ["No", "No Barrier", "No Crossing", "Past Project"]
+
 
 # Used to filter small barriers and dams by SNAP2018, based on guidance from Kat
 # Note: dropped barriers are still shown on the map, but not included in the network analysis
 # Note: 0 value indicates N/A
-DROP_SNAP2018 = [5, 6, 7, 8, 9, 10]
+DROP_SNAP2018 = [6, 8]
+
+# These are excluded from network analysis / prioritization, but included for mapping
+EXCLUDE_SNAP2018 = [5, 7, 9, 10]
 
 # Used to filter dams by PotentialFeasibility
 # based on guidance from Kat
-DROP_FEASIBILITY = [7, 16, 19]
+DROP_FEASIBILITY = [7, 19]
+
+# These are excluded from network analysis / prioritization, but included for mapping
+EXCLUDE_FEASIBILITY = [16]

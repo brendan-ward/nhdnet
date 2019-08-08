@@ -31,21 +31,18 @@ gdb_filename = "Waterfalls2019.gdb"
 
 print("Reading waterfalls")
 
-all_wf = gp.read_file(sarp_dir / gdb_filename)[
-    ["geometry", "Source", "fall_id", "LocalID"]
-]
+all_wf = gp.read_file(sarp_dir / gdb_filename)
 
+# joinID is used for all internal joins in analysis
 all_wf["joinID"] = all_wf.index.astype("uint")
 
 if QA:
-    orig_df = all_wf.copy()
+    qa_df = all_wf.copy()
 
 
-### Drop records with bad coordinates
-all_wf = all_wf.loc[all_wf.geometry.y.abs() <= 90]
-
-if QA:
-    orig_df.loc[orig_df.geometry.y.abs() > 90, "dropped"] = "bad coordinates"
+### Add tracking fields
+all_wf["networkAnalysis"] = True  # Note: none are filtered out currently
+all_wf["snapped"] = False
 
 ### Cleanup data
 all_wf.Source = all_wf.Source.str.strip()
@@ -59,20 +56,30 @@ all_wf.loc[usgs_idx, "sourceID"] = (
     all_wf.loc[usgs_idx].fall_id.astype("int").astype("str")
 )
 
-### Assign HUC2
-print("Reading HUC2 boundaries and joining to waterfalls")
-huc2 = gp.read_file(wbd_dir / "HUC2/HUC2.shp")
-all_wf.sindex
-huc2.sindex
-all_wf = gp.sjoin(all_wf, huc2[["geometry", "HUC2"]], how="left").drop(
-    columns=["index_right"]
-)
+
+### Drop records with bad coordinates
+all_wf = all_wf.loc[all_wf.geometry.y.abs() <= 90]
+
+if QA:
+    qa_df.loc[qa_df.geometry.y.abs() > 90, "dropped"] = "bad coordinates"
+
 
 ### Reproject to CONUS Albers
 all_wf = all_wf.to_crs(CRS)
 
+
+### Assign HUC2
+print("Reading HUC2 boundaries and joining to waterfalls")
+huc2 = gp.read_file(wbd_dir / "HUC2/HUC2.shp")[["geometry", "HUC2"]].to_crs(CRS)
+all_wf.sindex
+huc2.sindex
+all_wf = gp.sjoin(all_wf, huc2, how="left").drop(columns=["index_right"])
+
+
+### Snap by region group
 print("Starting snapping for {} waterfalls".format(len(all_wf)))
 snapped = None
+
 
 for group in REGION_GROUPS:
     print("\n----- {} ------\n".format(group))
@@ -87,7 +94,6 @@ for group in REGION_GROUPS:
     print("Reading spatial index on flowlines")
     sindex = deserialize_sindex(src_dir / "flowline.sidx")
 
-    ######### Process Waterfalls
     # Extract out waterfalls in this HUC
     wf = all_wf.loc[all_wf.HUC2.isin(REGION_GROUPS[group])].copy()
     print("Selected {0} waterfalls in region".format(len(wf)))
@@ -102,30 +108,49 @@ for group in REGION_GROUPS:
         snapped = snapped.append(wf, sort=False, ignore_index=True)
 
 
-# Remove duplicates after snapping, in case any snapped to the same position
+### Remove duplicates after snapping, in case any snapped to the same position
+# These are completely dropped from the analysis from here on out
 dedup = remove_duplicates(snapped, DUPLICATE_TOLERANCE)
 
 if QA:
     dup = snapped.loc[~snapped.joinID.isin(dedup.joinID)]
     print("Removed {} duplicates after snapping".format(len(dup)))
 
-    orig_df.loc[
-        orig_df.joinID.isin(dup.joinID), "dropped"
+    qa_df.loc[
+        qa_df.joinID.isin(dup.joinID), "dropped"
     ] = "drop duplicate after snapping"
 
 snapped = dedup
 
-print("\n--------------\n")
-print("Serializing {0} snapped waterfalls out of {1}".format(len(snapped), len(all_wf)))
-serialize_gdf(snapped, out_dir / "snapped_waterfalls.feather", index=False)
 
+### Update snapped geometry into master
+all_wf = (
+    all_wf.set_index("joinID")
+    .join(
+        snapped.set_index("joinID")[
+            ["geometry", "lineID", "NHDPlusID", "snap_dist", "nearby"]
+        ],
+        rsuffix="_snapped",
+    )
+    .reset_index()
+)
+idx = all_wf.loc[~all_wf.geometry_snapped.isnull()].index
+all_wf.loc[idx, "geometry"] = all_wf.loc[idx].geometry_snapped
+all_wf.loc[idx, "snapped"] = True
+all_wf = all_wf.drop(columns=["geometry_snapped"])
+
+
+print("\n--------------\n")
+print(
+    "Serializing {0} snapped waterfalls out of {1}".format(
+        len(all_wf.loc[all_wf.snapped]), len(all_wf)
+    )
+)
+serialize_gdf(all_wf, out_dir / "waterfalls.feather", index=False)
 
 if QA:
-    to_shp(orig_df.loc[~orig_df.dropped.isnull()], qa_dir / "dropped_waterfalls.shp")
-    # Write out those that didn't snap for QA
     print("writing shapefiles for QA/QC")
-    to_shp(snapped, qa_dir / "snapped_waterfalls.shp")
+    to_shp(all_wf, qa_dir / "waterfalls.shp")
 
-    unsnapped = all_wf.loc[~all_wf.joinID.isin(snapped.joinID)]
-    to_shp(unsnapped, qa_dir / "unsnapped_waterfalls.shp")
-
+    # write out any that were dropped by the analysis
+    to_shp(qa_df.loc[~qa_df.dropped.isnull()], qa_dir / "dropped_waterfalls.shp")

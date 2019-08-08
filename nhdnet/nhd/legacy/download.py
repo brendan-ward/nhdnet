@@ -1,14 +1,13 @@
 from shutil import copyfileobj
 import requests
 
+### NHD Medium Resolution
+# Listing URL: https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Hydrography/NHD/HU4/HighResolution/GDB/
+DATA_URL = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHD/HU4/HighResolution/GDB/NHD_H_{HUC4}_HU4_GDB.zip"
 
-### NHDPlus High Resolution
-# Listing URL: https://prd-tnm.s3.amazonaws.com/index.html?prefix=StagedProducts/Hydrography/NHDPlusHR/Beta/GDB/
-DATA_URL = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/NHDPlusHR/Beta/GDB/NHDPLUS_H_{HUC4}_HU4_GDB.zip"
 
-
-def download_huc4(HUC4, filename):
-    """Download HUC4 geodatabase (flowlines and boundaries) from NHD Plus HR data distribution site
+def download_huc4_mr(HUC4, filename):
+    """Download HUC4 geodatabase (flowlines and boundaries) from NHD Medium resolution data distribution site
     
     Parameters
     ----------
