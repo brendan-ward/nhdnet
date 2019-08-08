@@ -32,20 +32,15 @@ from stats import calculate_network_stats
 QA = True
 # Set to True to store intermediate files for QA / QC
 
-# RESUME = False
-# Set to True to re-use previously calculated intermediate files.  This can save time when debugging later steps.
 
 # mode determines the type of network analysis we are doing
 # natural: only include waterfalls in analysis
 # dams: include waterfalls and dams in analysis
 # small_barriers: include waterfalls, dams, and small barriers in analysis
 MODES = ("natural", "dams", "small_barriers")
-mode = MODES[1]  # TODO: document
+mode = MODES[2]
 
-# SMALL_BARRIERS = True
-# Set to True when you want to include small barriers in the analysis.  When included, small barriers are treated as HARD barriers. and WILL affect the results for dams.
-
-group = "03"  # Identifier of region group or region
+group = "13"  # Identifier of region group or region
 
 ### END Runtime variables
 
@@ -63,9 +58,9 @@ joins_feather = nhd_dir / group / "flowline_joins.feather"
 fp_feather = inputs_dir / "floodplain_stats.feather"
 
 # INPUT files from prepare_dams.py, prepare_waterfalls.py, prepare_small_barriers.py
-dams_feather = inputs_dir / "snapped_dams.feather"
-waterfalls_feather = inputs_dir / "snapped_waterfalls.feather"
-small_barriers_feather = inputs_dir / "snapped_small_barriers.feather"
+dams_feather = inputs_dir / "dams.feather"
+waterfalls_feather = inputs_dir / "waterfalls.feather"
+small_barriers_feather = inputs_dir / "small_barriers.feather"
 
 
 # OUTPUT files
@@ -81,8 +76,8 @@ if not os.path.exists(intermediate_dir):
 
 barrier_feather = intermediate_dir / "barriers.feather"
 split_flowline_feather = intermediate_dir / "split_flowlines.feather"
-updated_joins_feather = intermediate_dir / "updated_joins_{}.feather"
-barrier_joins_feather = intermediate_dir / "barrier_joins_{}.feather"
+updated_joins_feather = intermediate_dir / "updated_joins.feather"
+barrier_joins_feather = intermediate_dir / "barrier_joins.feather"
 network_segments_feather = intermediate_dir / "network_segments.feather"
 
 # FINAL OUTPUT files
@@ -104,8 +99,7 @@ barrier_start = time()
 print("Reading waterfalls")
 wf = deserialize_gdf(waterfalls_feather)
 wf["kind"] = "waterfall"
-# wf["AnalysisID"] = ""  # FIXME
-wf = wf.loc[wf.HUC2.isin(REGION_GROUPS[group])][BARRIER_COLUMNS].copy()
+wf = wf.loc[wf.snapped & wf.HUC2.isin(REGION_GROUPS[group])][BARRIER_COLUMNS].copy()
 print("Selected {} waterfalls".format(len(wf)))
 
 barriers = wf
@@ -114,7 +108,9 @@ if mode != "natural":
     print("Reading dams")
     dams = deserialize_gdf(dams_feather)
     dams["kind"] = "dam"
-    dams = dams.loc[dams.HUC2.isin(REGION_GROUPS[group])][BARRIER_COLUMNS].copy()
+    dams = dams.loc[dams.snapped & dams.HUC2.isin(REGION_GROUPS[group])][
+        BARRIER_COLUMNS
+    ].copy()
     print("Selected {} dams".format(len(dams)))
 
     if len(dams):
@@ -124,7 +120,7 @@ if mode == "small_barriers":
     print("Reading small barriers")
     sb = deserialize_gdf(small_barriers_feather)
     sb["kind"] = "small_barrier"
-    sb = sb.loc[sb.HUC2.isin(REGION_GROUPS[group])].copy()
+    sb = sb.loc[sb.snapped & sb.HUC2.isin(REGION_GROUPS[group])].copy()
     print("Selected {} small barriers".format(len(sb)))
 
     if len(sb):
@@ -160,16 +156,6 @@ print("read {} flowlines".format(len(flowlines)))
 
 
 ##################### Cut flowlines #################
-# if RESUME and os.path.exists(split_flowline_feather):
-#     print("reading cut segments and joins")
-
-#     flowlines = deserialize_gdf(split_flowline_feather).set_index("lineID", drop=False)
-#     joins = deserialize_df(updated_joins_feather)
-#     barrier_joins = deserialize_df(barrier_joins_feather).set_index(
-#         "joinID", drop=False
-#     )
-
-# else:
 cut_start = time()
 print("------------------- Cutting flowlines -----------")
 print("Starting from {} original segments".format(len(flowlines)))
