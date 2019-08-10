@@ -22,8 +22,8 @@ from nhdnet.io import (
     serialize_gdf,
 )
 
-from constants import BARRIER_COLUMNS, REGION_GROUPS
-from stats import calculate_network_stats
+from custom.sarp.constants import BARRIER_COLUMNS, REGION_GROUPS
+from custom.sarp.stats import calculate_network_stats
 
 
 ### START Runtime variables
@@ -40,7 +40,7 @@ QA = True
 MODES = ("natural", "dams", "small_barriers")
 mode = MODES[2]
 
-group = "13"  # Identifier of region group or region
+group = "03"  # Identifier of region group or region
 
 ### END Runtime variables
 
@@ -82,8 +82,8 @@ network_segments_feather = intermediate_dir / "network_segments.feather"
 
 # FINAL OUTPUT files
 network_feather = out_dir / "network.feather"
-network_stats_csv = out_dir / "network_stats.csv"
-barrier_network_csv = out_dir / "barriers_network.csv"
+network_stats_feather = out_dir / "network_stats.feather"
+barrier_network_feather = out_dir / "barriers_network.feather"
 
 
 #### Start
@@ -183,10 +183,15 @@ if QA:
 
 
 ##################### Create networks #################
+# IMPORTANT: the following analysis allows for multiple upstream networks from an origin or barrier
+# this happens when the barrier is perfectly snapped to the junction of >= 2 upstream networks.
+# When this is encountered, these networks are merged together and assigned the ID of the first segment
+# of the first upstream network.
+
 print("------------------- Creating networks -----------")
 network_start = time()
 
-# remove any origin segments
+# remove any origin segments ()
 barrier_segments = barrier_joins.loc[barrier_joins.upstream_id != 0][["upstream_id"]]
 
 print("generating upstream index")
@@ -202,7 +207,7 @@ upstreams = (
     .to_dict()
 )
 
-# Create networks from all terminal nodes (no downstream nodes) up to barriers
+# Create networks from all terminal nodes (have no downstream nodes) up to barriers
 # Note: origins are also those that have a downstream_id but are not the upstream_id of another node
 origin_idx = (joins.downstream_id == 0) | (
     ~joins.downstream_id.isin(joins.upstream_id.unique())
@@ -216,14 +221,44 @@ print(
     )
 )
 
+# origin segments are the root of each non-barrier origin point up to barriers
+# segments are indexed by the id of the segment at the root for each network
 origin_network_segments = generate_networks(root_ids, upstreams)
 origin_network_segments["type"] = "origin"
 
+# barrier segments are the root of each upstream network from each barrier
+# segments are indexed by the id of the segment at the root for each network
 barrier_network_segments = generate_networks(barrier_segments, upstreams)
 barrier_network_segments["type"] = "barrier"
 
-# Append and join back to flowlines, dropping anything that didn't get networks
-network_df = origin_network_segments.append(barrier_network_segments, sort=False)
+# In Progress - multiple upstreams
+upstream_count = barrier_joins.groupby("joinID").size()
+multiple_upstreams = barrier_joins.loc[
+    barrier_joins.joinID.isin(upstream_count.loc[upstream_count > 1].index)
+].set_index("joinID")
+
+if len(multiple_upstreams):
+    print(
+        "Merging multiple upstream networks for barriers at network junctions, affects {} networks".format(
+            len(multiple_upstreams)
+        )
+    )
+
+    # For each barrier with multiple upstreams, coalesce their networkIDs
+    for joinID in multiple_upstreams.index.unique():
+        upstream_ids = multiple_upstreams.loc[joinID].upstream_id
+
+        # Set all upstream networks for this barrier to the ID of the first
+        barrier_network_segments.loc[
+            barrier_network_segments.networkID.isin(upstream_ids), ["networkID"]
+        ] = upstream_ids.iloc[0]
+
+# Append network types back together
+network_df = origin_network_segments.append(
+    barrier_network_segments, sort=False, ignore_index=False
+)
+
+# Join back to flowlines, dropping anything that didn't get networks
 network_df = flowlines.join(network_df, how="inner")
 
 print(
@@ -251,7 +286,10 @@ stats_start = time()
 network_stats = calculate_network_stats(network_df)
 print("done calculating network stats in {0:.2f}".format(time() - stats_start))
 
-network_stats.to_csv(network_stats_csv, index_label="networkID")
+serialize_df(network_stats.reset_index(), network_stats_feather)
+network_stats.to_csv(
+    str(network_stats_feather).replace(".feather", ".csv"), index_label="networkID"
+)
 
 # Drop columns we don't need later
 network_stats = network_stats[
@@ -263,9 +301,11 @@ print("calculating upstream and downstream networks for barriers")
 # join to upstream networks
 barriers = barriers.set_index("joinID")[["kind"]]
 barrier_joins.set_index("joinID", inplace=True)
+
+# Join upstream networks, dropping any that don't have networks
+upstream_stats = barrier_joins.join(network_stats, on="upstream_id").dropna()
 upstream_networks = (
-    barriers.join(barrier_joins.upstream_id)
-    .join(network_stats, on="upstream_id")
+    barriers.join(upstream_stats)
     .fillna(0)
     .rename(columns={"upstream_id": "upNetID", "miles": "UpstreamMiles"})
 )
@@ -280,20 +320,32 @@ downstream_networks = (
     ]
 )
 
+# Note: the join creates duplicates if there are multiple upstream or downstream
+# networks for a given barrier, so we drop these duplicates after the join.
+barrier_networks = upstream_networks.join(downstream_networks).drop_duplicates()
 
-barrier_networks = upstream_networks.join(downstream_networks)
+barrier_networks.UpstreamMiles = barrier_networks.UpstreamMiles.astype("float32")
+barrier_networks.DownstreamMiles = barrier_networks.DownstreamMiles.astype("float32")
 
 # Absolute gain is minimum of upstream or downstream miles
-barrier_networks["AbsoluteGainMi"] = barrier_networks[
-    ["UpstreamMiles", "DownstreamMiles"]
-].min(axis=1)
+barrier_networks["AbsoluteGainMi"] = (
+    barrier_networks[["UpstreamMiles", "DownstreamMiles"]].min(axis=1).astype("float32")
+)
+
+# TotalNetworkMiles is sum of upstream and downstream miles
+barrier_networks["TotalNetworkMiles"] = (
+    barrier_networks[["UpstreamMiles", "DownstreamMiles"]].sum(axis=1).astype("float32")
+)
 barrier_networks.upNetID = barrier_networks.upNetID.fillna(0).astype("uint32")
 barrier_networks.downNetID = barrier_networks.downNetID.fillna(0).astype("uint32")
 barrier_networks.NumSizeClassGained = barrier_networks.NumSizeClassGained.fillna(
     0
 ).astype("uint8")
 
-barrier_networks.to_csv(barrier_network_csv, index_label="joinID")
+serialize_df(barrier_networks.reset_index(), barrier_network_feather)
+barrier_networks.to_csv(
+    str(barrier_network_feather).replace(".feather", ".csv"), index_label="joinID"
+)
 
 
 # TODO: if downstream network extends off this HUC, it will be null in the above and AbsoluteGainMin will be wrong

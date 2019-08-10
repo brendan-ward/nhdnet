@@ -98,3 +98,6 @@ This can take 10 - 60+ minutes depending on the size and complexity of the regio
 This cuts the network at each barrier and associates each barrier with an upstream and downstream flowline segment ID. It automatically calculates a new unique ID for a segment if it is creating a new segment between two barriers on the same original flowline segment. The networks are then re-assembled by traversing upstream from the downstream-most points of the NHD flowlines or from each barrier.
 
 The output of this is a shapefile with one feature per functional network, a network summary statistics CSV, and a CSV including the upstream and downstream network IDs associated with each barrier.
+
+IMPORTANT: there may be multiple upstream networks from a given barrier or origin point. If this is encountered, the multiple networks
+are merged together into a single network.

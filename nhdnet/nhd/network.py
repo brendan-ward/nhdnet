@@ -32,6 +32,8 @@ def generate_network(root_id, upstreams):
 
 def generate_networks(df, upstreams, column="upstream_id"):
     """Generate the upstream networks for each record in the input data frame.
+    IMPORTANT: this will produce multiple upstream networks from a given starting point
+    if the starting point is located at the junction of multiple upstream networks.
     
     Parameters
     ----------
@@ -63,45 +65,3 @@ def generate_networks(df, upstreams, column="upstream_id"):
         .rename(columns={column: "networkID"})
         .set_index("network")
     )
-
-
-# DEPRECATED: older, slower implementation
-# Depends on:
-
-# get_upstream_ids = lambda id: upstreams.loc[id].upstream_id
-# def get_upstream_ids(id):
-#     ids = upstreams.loc[id]
-#     if isinstance(ids, pd.Series):
-#         return ids
-#     # in case we got a single result back
-#     return [ids]
-
-# downstreams = join_ids.groupby("upstream_id")["downstream_id"].size()
-# has_multiple_downstreams = lambda id: downstreams.loc[id] > 1
-
-
-def generate_network_recursive(
-    id, get_upstream_ids, has_multiple_downstreams, stop_segments={}
-):
-    # print("segment {}".format(id))
-    ret = [id]
-
-    upstream_ids = get_upstream_ids(id)
-
-    for upstream_id in upstream_ids:
-        if upstream_id == 0:  # Origin
-            continue
-
-        if upstream_id in stop_segments:
-            continue
-
-        if has_multiple_downstreams(upstream_id):
-            # Make sure that we don't pass through this one multiple times!
-            stop_segments.add(upstream_id)
-
-        upstream_network = generate_network_recursive(
-            upstream_id, get_upstream_ids, has_multiple_downstreams, stop_segments
-        )
-        ret.extend(upstream_network)
-
-    return ret

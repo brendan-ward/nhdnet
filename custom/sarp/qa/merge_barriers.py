@@ -1,14 +1,18 @@
+"""
+Merge barriers output from network analysis for each region into a single shapefile.
+"""
+
+from pathlib import Path
 import os
 import pandas as pd
 
 from nhdnet.io import deserialize_gdf, to_shp
 
-from constants import REGION_GROUPS
+from ..constants import REGION_GROUPS
 
 
-src_dir = "/Users/bcward/projects/data/sarp"
-
-out_dir = "{}/networks".format(src_dir)
+data_dir = "../data/sarp/derived/outputs"
+out_dir = data_dir / "networks"
 
 for barrier_type in ("dams", "small_barriers"):
     print(barrier_type)
@@ -16,9 +20,7 @@ for barrier_type in ("dams", "small_barriers"):
     for group in REGION_GROUPS:
         print("------- {} -------".format(group))
         df = deserialize_gdf(
-            "{0}/nhd/region/{1}/barriers_{2}.feather".format(
-                src_dir, group, barrier_type
-            )
+            data_dir / group / barrier_type / "intermediate/barriers.feather"
         )
 
         if merged is None:
