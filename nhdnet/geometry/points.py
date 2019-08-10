@@ -1,4 +1,5 @@
 import geopandas as gp
+import numpy as np
 from shapely.geometry import Point
 
 
@@ -38,8 +39,8 @@ def remove_duplicates(df, tolerance):
     """
 
     temp = df[["geometry"]].copy()
-    temp["x"] = (temp.geometry.x / tolerance).round().astype("int") * tolerance
-    temp["y"] = (temp.geometry.y / tolerance).round().astype("int") * tolerance
+    temp["x"] = (temp.geometry.x / tolerance).apply(np.floor).astype("int") * tolerance
+    temp["y"] = (temp.geometry.y / tolerance).apply(np.floor).astype("int") * tolerance
     clean = temp.drop_duplicates(subset=["x", "y"], keep="first")
     return df.loc[df.index.isin(clean.index)].copy()
 

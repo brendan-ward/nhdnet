@@ -36,6 +36,7 @@ REGION_GROUPS = {
 SNAP_TOLERANCE = 100  # meters
 
 # All barriers that are within 10 meters of each other are reduced to the first one
+# Note: Dams within 30 meters of each other are considered duplicates
 DUPLICATE_TOLERANCE = 10  # meters
 
 # Use USGS CONUS Albers (EPSG:102003): https://epsg.io/102003    (same as other SARP datasets)

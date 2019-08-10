@@ -21,7 +21,6 @@ from constants import (
     REGIONS,
     CRS,
     SNAP_TOLERANCE,
-    DUPLICATE_TOLERANCE,
     DROP_SNAP2018,
     EXCLUDE_SNAP2018,
     DROP_FEASIBILITY,
@@ -30,7 +29,7 @@ from constants import (
 
 
 QA = True
-
+DUPLICATE_TOLERANCE = 30
 
 data_dir = Path("../data/sarp/")
 nhd_dir = data_dir / "derived/nhd/region"
@@ -111,7 +110,7 @@ if QA:
 all_dams = all_dams.to_crs(CRS)
 
 
-### Remove duplicates (within DUPLICATE_TOLERANCE)
+### Remove duplicates within 30m
 all_dams = remove_duplicates(all_dams, DUPLICATE_TOLERANCE)
 print("{} dams left after removing duplicates".format(len(all_dams)))
 
