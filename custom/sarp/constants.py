@@ -82,6 +82,7 @@ KEEP_POTENTIAL_PROJECT = [
 
 # Used to filter Potential_Project (small barriers)
 # These are DROPPED from all analysis and mapping
+# TODO: add "No Upstream Habitat", "No Upstream Channel" ?
 DROP_POTENTIAL_PROJECT = ["No", "No Barrier", "No Crossing", "Past Project"]
 
 

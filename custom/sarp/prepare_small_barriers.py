@@ -55,7 +55,6 @@ all_sb = (
     [
         "Crossing_Code",
         "LocalID",
-        "TownId",
         "StreamName",
         "Road",
         "RoadTypeId",
