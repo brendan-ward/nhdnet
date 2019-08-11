@@ -41,7 +41,19 @@ DUPLICATE_TOLERANCE = 10  # meters
 
 # Use USGS CONUS Albers (EPSG:102003): https://epsg.io/102003    (same as other SARP datasets)
 # use Proj4 syntax, since GeoPandas doesn't properly recognize it's EPSG Code.
-CRS = "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
+# CRS = "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
+CRS = {
+    "proj": "aea",
+    "lat_1": 29.5,
+    "lat_2": 45.5,
+    "lat_0": 37.5,
+    "lon_0": -96,
+    "x_0": 0,
+    "y_0": 0,
+    "datum": "NAD83",
+    "units": "m",
+    "no_defs": True,
+}
 
 # The columns to include from the barriers data for use in the network analysis.
 # The same columns are included for each type of barrier.

@@ -88,12 +88,11 @@ These data were exported to a FGDB, and prepared for analysis here using `prepar
 
 ### Perform network analysis
 
-Once all the inputs are prepared using the above steps, you can now perform the network analysis for that region or group of regions.
+Once all the inputs are prepared using the above steps, you can now perform the network analysis for that region or group of regions. This can take 10 - 60+ minutes depending on the size and complexity of the region.
 
 1. Run `network_analysis.py` once for dams (set `SMALL_BARRIERS = False`)
 2. Run `network_analysis.py` again for small barriers (set `SMALL_BARRIERS = True`)
-
-This can take 10 - 60+ minutes depending on the size and complexity of the region.
+3. Run `merge_outputs.py` to create the final aggregated results across all regions.
 
 This cuts the network at each barrier and associates each barrier with an upstream and downstream flowline segment ID. It automatically calculates a new unique ID for a segment if it is creating a new segment between two barriers on the same original flowline segment. The networks are then re-assembled by traversing upstream from the downstream-most points of the NHD flowlines or from each barrier.
 

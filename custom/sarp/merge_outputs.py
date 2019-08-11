@@ -17,6 +17,9 @@ from nhdnet.io import (
 
 from custom.sarp.constants import REGION_GROUPS, CRS
 
+
+QA = False
+
 data_dir = Path("../data/sarp/derived")
 out_dir = data_dir / "final_results"
 qa_dir = Path("../data/sarp/qa")
@@ -78,6 +81,10 @@ for barrier_type in ("dams", "small_barriers"):
         .set_index("joinID")
         .drop(
             columns=[
+                "x",
+                "y",
+                "xy",
+                "NHDplus_Version",
                 "PctNatFloodplain_Score",
                 "PctNatFloodplain_Rank",
                 "AbsoluteGainMi_Rank",
@@ -129,10 +136,12 @@ for barrier_type in ("dams", "small_barriers"):
         print(
             "These are most likely at the upstream terminals of networks, but should double check"
         )
-        to_shp(
-            snapped_no_network,
-            qa_dir / "{}_snapped_no_network.shp".format(barrier_type),
-        )
+
+        if QA:
+            to_shp(
+                snapped_no_network,
+                qa_dir / "{}_snapped_no_network.shp".format(barrier_type),
+            )
 
     # Join region 8 back in
     results_df = results_df.append(
@@ -170,6 +179,7 @@ for barrier_type in ("dams", "small_barriers"):
     serialize_gdf(results_df, out_dir / "{}.feather".format(barrier_type), index=False)
     results_df.drop(columns=["geometry"]).to_csv(out_dir / "dams.csv", index=False)
 
-    print("Serializing barriers to shapefile")
-    to_shp(results_df, out_dir / "{}.shp".format(barrier_type))
+    if QA:
+        print("Serializing barriers to shapefile")
+        to_shp(results_df, qa_dir / "{}_network_analysis_results.shp".format(barrier_type))
 

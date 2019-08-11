@@ -33,6 +33,7 @@ DUPLICATE_TOLERANCE = 30
 
 data_dir = Path("../data/sarp/")
 nhd_dir = data_dir / "derived/nhd/region"
+boundaries_dir = data_dir / "derived/boundaries"
 sarp_dir = data_dir / "inventory"
 out_dir = data_dir / "derived/inputs"
 qa_dir = data_dir / "qa"
@@ -41,20 +42,83 @@ dams_filename = "Dams_Webviewer_DraftOne_Final.gdb"
 
 start = time()
 
-all_dams = gp.read_file(sarp_dir / dams_filename)
+all_dams = gp.read_file(sarp_dir / dams_filename)[
+    [
+        "AnalysisID",
+        "GlobalID",
+        "OBJECTID",
+        "NIDID",
+        "SourceDBID",
+        "Barrier_Name",
+        "Other_Barrier_Name",
+        "River",
+        "PurposeCategory",
+        "Year_Completed",
+        "Height",
+        "StructureCondition",
+        "ConstructionMaterial",
+        "ProtectedLand",
+        "DB_Source",
+        "Off_Network",
+        "Mussel_Presence",
+        "AbsoluteGainMi",
+        "UpstreamMiles",
+        "DownstreamMiles",
+        "TotalNetworkMiles",
+        "PctNatFloodplain",
+        "NetworkSinuosity",
+        "NumSizeClassGained",
+        "NumberRareSpeciesHUC12",
+        "batUSNetID",
+        "batDSNetID",
+        "StreamOrder",
+        "SARPID",
+        "Recon",
+        "PotentialFeasibility",
+        "Snap2018",
+        "geometry",
+    ]
+]
 print("Read {} dams".format(len(all_dams)))
 
-
+# joinID is used for all internal joins in analysis
 all_dams["joinID"] = all_dams.index.astype("uint")
 
-# NOTE: these data currently include HUC12, which we use for deriving HUC2
-# Long term, this may need to be replaced with a spatial join here
-all_dams["HUC2"] = all_dams.HUC12.str[:2]
+
+### Spatial join against HUC12 and then derive HUC2
+print("Reading HUC2 boundaries and joining to dams")
+huc12 = deserialize_gdf(boundaries_dir / "HUC12.feather")
+all_dams.sindex
+huc12.sindex
+all_dams = gp.sjoin(all_dams, huc12, how="left").drop(columns=["index_right"])
+
+
+print("Reading state boundaries and joining to dams")
+states = deserialize_gdf(boundaries_dir / "states.feather")
+states.sindex
+all_dams = gp.sjoin(all_dams, states, how="left").drop(columns=["index_right"])
 
 
 if QA:
     qa_df = all_dams.copy()
     qa_df["dropped"] = np.nan
+    qa_df.loc[
+        all_dams.HUC12.isnull() | all_dams.STATEFIPS.isnull(), "dropped"
+    ] = "dropped outside of HUC12 or states"
+
+
+# Drop any that didn't intersect HUCs or states
+print(
+    "{} dams are outside HUC12 / states".format(
+        len(all_dams.loc[all_dams.HUC12.isnull() | all_dams.STATEFIPS.isnull()])
+    )
+)
+all_dams = all_dams.dropna(subset=["HUC12", "STATEFIPS"])
+
+
+# Add HUC2 from HUC12
+all_dams["HUC2"] = all_dams.HUC12.str[:2]
+
 
 ### Add tracking fields
 all_dams["networkAnalysis"] = False

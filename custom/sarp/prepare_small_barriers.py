@@ -16,7 +16,7 @@ from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex, to_shp
 from nhdnet.geometry.points import remove_duplicates
 from nhdnet.geometry.lines import snap_to_line
 
-from constants import (
+from custom.sarp.constants import (
     REGION_GROUPS,
     REGIONS,
     CRS,
@@ -36,6 +36,7 @@ QA = True
 data_dir = Path("../data/sarp/")
 nhd_dir = data_dir / "derived/nhd/region"
 sarp_dir = data_dir / "inventory"
+boundaries_dir = data_dir / "derived/boundaries"
 out_dir = data_dir / "derived/inputs"
 qa_dir = data_dir / "qa"
 barriers_filename = "Road_Related_Barriers_DraftOne_Final08012019.gdb"
@@ -43,11 +44,50 @@ barriers_filename = "Road_Related_Barriers_DraftOne_Final08012019.gdb"
 start = time()
 
 
+# Read in authoritative original small barriers data
+# drop all columns not necessary later in the stack
+# or ones that will be processed through internally
 all_sb = (
     gp.read_file(sarp_dir / barriers_filename)
     .rename(columns={"AnalysisId": "AnalysisID"})
     .to_crs(CRS)
-)
+)[
+    [
+        "Crossing_Code",
+        "LocalID",
+        "TownId",
+        "StreamName",
+        "Road",
+        "RoadTypeId",
+        "CrossingTypeId",
+        "NumberOfStructures",
+        "CrossingConditionId",
+        "CrossingComment",
+        "OnConservationLand",
+        "Assessed",
+        "SRI_Score",
+        "Coffman_Strong",
+        "Coffman_Medium",
+        "Coffman_Weak",
+        "SARP_Score",
+        "SE_AOP",
+        "Potential_Project",
+        "Source",
+        "AbsoluteGainMi",
+        "UpstreamMiles",
+        "DownstreamMiles",
+        "TotalNetworkMiles",
+        "PctNatFloodplain",
+        "NetworkSinuosity",
+        "NumSizeClassesGained",
+        "batUSNetID",
+        "batDSNetId",
+        "NumberRareSpeciesHUC12",
+        "AnalysisID",
+        "SNAP2018",
+        "geometry",
+    ]
+]
 
 print("Read {} small barriers".format(len(all_sb)))
 
@@ -55,14 +95,38 @@ print("Read {} small barriers".format(len(all_sb)))
 # joinID is used for all internal joins in analysis
 all_sb["joinID"] = all_sb.index.astype("uint")
 
-# NOTE: these currently include HUC12, which we use for deriving HUC2
-# Long term, this may need to be replaced with a spatial join here
-all_sb["HUC2"] = all_sb.HUC12.str[:2]
+### Spatial join against HUC12 and then derive HUC2
+print("Reading HUC2 boundaries and joining to small barriers")
+huc12 = deserialize_gdf(boundaries_dir / "HUC12.feather")
+all_sb.sindex
+huc12.sindex
+all_sb = gp.sjoin(all_sb, huc12, how="left").drop(columns=["index_right"])
 
+
+print("Reading state boundaries and joining to small barriers")
+states = deserialize_gdf(boundaries_dir / "states.feather")
+states.sindex
+all_sb = gp.sjoin(all_sb, states, how="left").drop(columns=["index_right"])
 
 if QA:
     qa_df = all_sb.copy()
     qa_df["dropped"] = np.nan
+    qa_df.loc[
+        all_sb.HUC12.isnull() | all_sb.STATEFIPS.isnull(), "dropped"
+    ] = "dropped outside of HUC12 or states"
+
+
+# Drop any that didn't intersect HUCs or states
+print(
+    "{} small barriers are outside HUC12 / states".format(
+        len(all_sb.loc[all_sb.HUC12.isnull() | all_sb.STATEFIPS.isnull()])
+    )
+)
+all_sb = all_sb.dropna(subset=["HUC12", "STATEFIPS"])
+
+
+# Add HUC2 from HUC12
+all_sb["HUC2"] = all_sb.HUC12.str[:2]
 
 
 ### Add tracking fields
@@ -84,7 +148,9 @@ all_sb = all_sb.loc[~drop_idx].copy()
 
 
 if QA:
-    qa_df.loc[~qa_df.joinID.isin(all_sb), "dropped"] = "drop Potential_Project"
+    qa_df.loc[
+        ~qa_df.joinID.isin(all_sb) & qa_df.dropped.isnull(), "dropped"
+    ] = "drop Potential_Project"
 
 
 ### Exclude barriers that should not be analyzed or prioritized
@@ -148,7 +214,6 @@ for group in REGION_GROUPS:
         else:
             snapped = snapped.append(sb, sort=False, ignore_index=True)
 
-
 # Remove duplicates after snapping, in case any snapped to the same position
 # These are completely dropped from the analysis from here on out
 dedup = remove_duplicates(snapped, DUPLICATE_TOLERANCE)
@@ -194,5 +259,5 @@ if QA:
     to_shp(all_sb, qa_dir / "small_barriers.shp")
 
     # write out any that were dropped by the analysis
-    to_shp(qa_df.loc[~qa_df.dropped.isnull()], qa_dir / "dropped_small_barriers.shp")
+    to_shp(qa_df.loc[qa_df.dropped.notnull()], qa_dir / "dropped_small_barriers.shp")
 

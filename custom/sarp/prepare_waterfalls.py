@@ -8,6 +8,7 @@ Extract waterfalls from original data source, process for use in network analysi
 from pathlib import Path
 import pandas as pd
 import geopandas as gp
+import numpy as np
 
 from nhdnet.io import serialize_gdf, deserialize_gdf, deserialize_sindex, to_shp
 from nhdnet.geometry.lines import snap_to_line
@@ -22,7 +23,7 @@ QA = True
 
 data_dir = Path("../data/sarp/")
 nhd_dir = data_dir / "derived/nhd/region"
-wbd_dir = data_dir / "nhd/wbd"
+boundaries_dir = data_dir / "derived/boundaries"
 sarp_dir = data_dir / "inventory"
 out_dir = data_dir / "derived/inputs"
 qa_dir = data_dir / "qa"
@@ -58,22 +59,45 @@ all_wf.loc[usgs_idx, "sourceID"] = (
 
 
 ### Drop records with bad coordinates
+# must be done before projecting coordinates
 all_wf = all_wf.loc[all_wf.geometry.y.abs() <= 90]
-
-if QA:
-    qa_df.loc[qa_df.geometry.y.abs() > 90, "dropped"] = "bad coordinates"
-
 
 ### Reproject to CONUS Albers
 all_wf = all_wf.to_crs(CRS)
 
 
-### Assign HUC2
 print("Reading HUC2 boundaries and joining to waterfalls")
-huc2 = gp.read_file(wbd_dir / "HUC2/HUC2.shp")[["geometry", "HUC2"]].to_crs(CRS)
+huc12 = deserialize_gdf(boundaries_dir / "HUC12.feather")
 all_wf.sindex
-huc2.sindex
-all_wf = gp.sjoin(all_wf, huc2, how="left").drop(columns=["index_right"])
+huc12.sindex
+all_wf = gp.sjoin(all_wf, huc12, how="left").drop(columns=["index_right"])
+
+
+print("Reading state boundaries and joining to waterfalls")
+states = deserialize_gdf(boundaries_dir / "states.feather")
+states.sindex
+all_wf = gp.sjoin(all_wf, states, how="left").drop(columns=["index_right"])
+
+
+if QA:
+    qa_df = all_wf.copy()
+    qa_df["dropped"] = np.nan
+    qa_df.loc[
+        all_wf.HUC12.isnull() | all_wf.STATEFIPS.isnull(), "dropped"
+    ] = "dropped outside of HUC12 or states"
+
+
+# Drop any that didn't intersect HUCs or states
+print(
+    "{} small barriers are outside HUC12 / states".format(
+        len(all_wf.loc[all_wf.HUC12.isnull() | all_wf.STATEFIPS.isnull()])
+    )
+)
+all_wf = all_wf.dropna(subset=["HUC12", "STATEFIPS"])
+
+
+# Add HUC2 from HUC12
+all_wf["HUC2"] = all_wf.HUC12.str[:2]
 
 
 ### Snap by region group
