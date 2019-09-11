@@ -49,6 +49,29 @@ def update_joins(joins, new_downstreams, new_upstreams):
     return joins.drop(columns=["new_downstream_id", "new_upstream_id"])
 
 
+def prep_new_flowlines(flowlines, new_segments):
+    # join in data from flowlines into new segments
+    new_flowlines = new_segments.join(
+        flowlines[["sizeclass", "streamorder"]], on="origLineID"
+    )
+
+    # calculate length and sinuosity
+    new_flowlines["length"] = new_flowlines.length
+    new_flowlines["sinuosity"] = new_flowlines.geometry.apply(calculate_sinuosity)
+
+    return new_flowlines[
+        [
+            "lineID",
+            "NHDPlusID",
+            "sizeclass",
+            "streamorder",
+            "length",
+            "sinuosity",
+            "geometry",
+        ]
+    ]
+
+
 def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     print("Starting number of segments: {:,}".format(len(flowlines)))
     print("Cutting in {:,} barriers".format(len(barriers)))
@@ -57,25 +80,13 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     if next_segment_id is None:
         next_segment_id = int(flowlines.index.max() + 1)
 
-    # origLineID is the original lineID of the segment that was split
-    # can be used to join back to flowlines to get the other props
-    # columns = ["length", "sinuosity", "geometry", "lineID", "origLineID"]
-
-    # join barriers on original lineID to joins between lines
-    # TODO: this isn't right
-    # barrier_joins = (
-    #     barriers[["geometry", "barrierID", "lineID"]]
-    #     .join(joins.set_index("upstream_id")["downstream_id"], on="lineID")
-    #     .join(joins.set_index("downstream_id")["upstream_id"], on="lineID")
-    # )
-
     # Initially, the upstream and downstream IDs for each barrier are the segment it is on
     barrier_joins = barriers[["barrierID", "lineID"]].copy()
     barrier_joins["upstream_id"] = barrier_joins.lineID
     barrier_joins["downstream_id"] = barrier_joins.lineID
 
     # join barriers to lines and extract those that have segments (via inner join)
-    barrier_segments = flowlines.join(
+    barrier_segments = flowlines[["lineID", "NHDPlusID", "geometry"]].join(
         barriers[["geometry", "barrierID", "lineID"]].set_index("lineID"),
         rsuffix="_barrier",
         how="inner",
@@ -85,9 +96,9 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     no_barrier_segments = flowlines.loc[~flowlines.index.isin(barrier_segments.index)]
 
     # add in count of barriers per segment
-    barrier_segments = barrier_segments.join(
-        barrier_segments.groupby(level=0).size().rename("barriers")
-    )
+    # barrier_segments = barrier_segments.join(
+    #     barrier_segments.groupby(level=0).size().rename("barriers")
+    # )
 
     # calculate the position of each barrier on each segment
     barrier_segments["linepos"] = barrier_segments.apply(
@@ -97,55 +108,79 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     # ordinate the barriers by their projected distance on the line
     # Order this so we are always moving from upstream end to downstream end
     # TODO: only need to sort the splits, not the ones at the terminals
-    barrier_segments = barrier_segments.rename_axis("idx").sort_values(
-        by=["idx", "linepos"], ascending=True
-    )
+    # barrier_segments = barrier_segments.rename_axis("idx").sort_values(
+    #     by=["idx", "linepos"], ascending=True
+    # )
 
     # Barriers are on upstream or downstream end of segment if they are within
     # EPS of the ends.  Otherwise, they are splits
+
+    ### Upstream endpoint barriers
     barrier_segments["on_upstream"] = barrier_segments.linepos <= EPS
-    barrier_segments["on_downstream"] = (
-        barrier_segments.linepos >= barrier_segments.length - EPS
+    print(
+        "{:,} barriers on upstream point of their segments".format(
+            len(barrier_segments.loc[barrier_segments.on_upstream])
+        )
     )
-
-    # Otherwise they are splits
-    split_segments = barrier_segments.loc[
-        ~(barrier_segments.on_upstream | barrier_segments.on_downstream)
-    ]
-
-    # for those barriers on upstream end, their downstream_id is the lineID they are on
+    # their downstream_id is the lineID they are on
     idx = barrier_joins.index.isin(
         barrier_segments.loc[barrier_segments.on_upstream].barrierID
     )
     barrier_joins.loc[idx, "downstream_id"] = barrier_joins.loc[idx].lineID
 
-    # for those barriers on the downstream end, their upstream_id is the lineID they are on
+    ### Downstream endpoint barriers
+    barrier_segments["on_downstream"] = (
+        barrier_segments.linepos >= barrier_segments.length - EPS
+    )
+
+    print(
+        "{:,} barriers on downstream point of their segments".format(
+            len(barrier_segments.loc[barrier_segments.on_downstream])
+        )
+    )
+    # their upstream_id is the lineID they are on
     idx = barrier_joins.index.isin(
         barrier_segments.loc[barrier_segments.on_downstream].barrierID
     )
-    barrier_joins.loc[idx, "upstream_id"] = barrier_joins.loc[idx].lineID
 
-    # if there is only 1 barrier per segment, things are much easier!
+    ### Split segments
+    split_segments = barrier_segments.loc[
+        ~(barrier_segments.on_upstream | barrier_segments.on_downstream)
+    ]
 
-    #### WIP: Easy splints - 1 barrier per segment
-    easy_splits = split_segments.loc[split_segments.barriers == 1].reset_index()
+    # ordinate the barriers by their projected distance on the line
+    # Order this so we are always moving from upstream end to downstream end
+    split_segments = split_segments.rename_axis("idx").sort_values(
+        by=["idx", "linepos"], ascending=True
+    )
+
+    # join in count of barriers that SPLIT this segment
+    split_segments = split_segments.join(
+        split_segments.groupby(level=0).size().rename("barriers")
+    )
+
+    ##### Splits with 1 barrier per segment (easier!)
+    # TODO: figure out reset_index or not??
+    single_splits = split_segments.loc[split_segments.barriers == 1]  # .reset_index()
+
+    print("{:,} segments split by a single barrier".format(len(single_splits)))
 
     geoms = (
-        easy_splits.apply(
+        single_splits.apply(
             lambda row: cut_line_at_point(row.geometry, row.geometry_barrier), axis=1
         )
         .apply(pd.Series)
         .rename(columns={0: "upstream", 1: "downstream"})
     )
 
-    easy_splits = (
-        easy_splits[["lineID", "barrierID", "NHDPlusID"]]
+    single_splits = (
+        single_splits[["lineID", "barrierID", "NHDPlusID"]]
         .join(geoms)
         .rename(columns={"lineID": "origLineID"})
     )
 
     new_segments = gp.GeoDataFrame(
-        easy_splits.melt(
+        single_splits.melt(
             id_vars=["origLineID", "barrierID", "NHDPlusID"],
             value_vars=["upstream", "downstream"],
             value_name="geometry",
@@ -157,31 +192,37 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     # generate a new ID for each segment
     new_segments["lineID"] = next_segment_id + new_segments.index
 
+    # Append new flowlines
+    new_flowlines = prep_new_flowlines(flowlines, new_segments)
+    updated_flowlines = no_barrier_segments.append(
+        new_flowlines, ignore_index=True, sort=False
+    ).set_index("lineID", drop=False)
+
     # join in data from flowlines
-    new_flowlines = new_segments.join(
-        flowlines[["sizeclass", "streamorder"]], on="origLineID"
-    )
+    # new_flowlines = new_segments.join(
+    #     flowlines[["sizeclass", "streamorder"]], on="origLineID"
+    # )
 
     # calculate length and sinuosity
-    new_flowlines["length"] = new_flowlines.length
-    new_flowlines["sinuosity"] = new_flowlines.geometry.apply(calculate_sinuosity)
+    # new_flowlines["length"] = new_flowlines.length
+    # new_flowlines["sinuosity"] = new_flowlines.geometry.apply(calculate_sinuosity)
 
     # Append new flowlines
-    updated_flowlines = no_barrier_segments.append(
-        new_flowlines[
-            [
-                "lineID",
-                "NHDPlusID",
-                "sizeclass",
-                "streamorder",
-                "length",
-                "sinuosity",
-                "geometry",
-            ]
-        ],
-        ignore_index=True,
-        sort=False,
-    ).set_index("lineID", drop=False)
+    # updated_flowlines = no_barrier_segments.append(
+    #     new_flowlines[
+    #         [
+    #             "lineID",
+    #             "NHDPlusID",
+    #             "sizeclass",
+    #             "streamorder",
+    #             "length",
+    #             "sinuosity",
+    #             "geometry",
+    #         ]
+    #     ],
+    #     ignore_index=True,
+    #     sort=False,
+    # ).set_index("lineID", drop=False)
 
     # update joins
     # NOTE: these are from the perspective of the line segment that was split
@@ -219,9 +260,168 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
         .set_index("origLineID")
         .lineID.rename("new_downstream_id")
     )
+
+    # TODO: can be replaced with .update()?  Need indices to be set properly first
     barrier_joins = update_joins(barrier_joins, new_downstreams, new_upstreams)
 
-    # TODO: hard splits
+    #### Multiple barriers per segment (harder)
+    multi_splits = split_segments.loc[split_segments.barriers > 1]  # .reset_index()
+    print("{:,} segments split by multiple barriers".format(len(multi_splits)))
+
+    # FIXME:
+    multi_splits = multi_splits.loc[multi_splits.lineID == 207026855]
+
+    # Group barriers by line so that we can split geometries in one pass
+    grouped = (
+        multi_splits[
+            [
+                "lineID",
+                "NHDPlusID",
+                "barrierID",
+                "barriers",
+                "geometry",
+                "geometry_barrier",
+            ]
+        ]
+        .groupby("lineID")
+        .agg(
+            {
+                "lineID": "first",
+                "NHDPlusID": "first",
+                "geometry": "first",
+                "barrierID": list,
+                "barriers": "first",
+                "geometry_barrier": list,
+            }
+        )
+    )
+
+    # cut line for all barriers
+    geoms = grouped.apply(
+        lambda row: cut_line_at_points(row.geometry, row.geometry_barrier), axis=1
+    )
+
+    # create one column per segment
+    barrier_cols = grouped.barrierID.apply(pd.Series)
+
+    # pivot into multiple rows instead of columns
+    stacked = (
+        barrier_cols.stack()
+        .reset_index()
+        .rename(columns={"level_1": "barrierIdx", 0: "barrierID"})
+        .set_index("lineID")
+        # join in all segments to every barrier, we'll extract out the ones we want below
+        .join(geoms.rename("geometry"))
+        .reset_index()
+        .set_index(["lineID", "barrierID"])
+    )
+
+    # extract segments per barrier
+    # FIXME: logic error: should only have one segment per barrier not 2!
+    # spb = stacked.apply(
+    #     lambda row: row.geometry[row.barrierIdx : row.barrierIdx + 2], axis=1
+    # )
+        spb = stacked.apply(
+        lambda row: row.geometry[row.barrierIdx : row.barrierIdx + 1], axis=1
+    )
+
+    spb = stacked.drop(columns=["geometry"]).join(
+        spb.rename("geometry")
+        .apply(pd.Series)
+        .rename(columns={0: "upstream", 1: "downstream"})
+    )
+
+    # now have a segment pair (upstream, downstream) for each barrier
+    # transform into multiple rows to assign new lineIDs
+    new_segments = (
+        spb.reset_index()
+        .rename(columns={"lineID": "origLineID"})
+        .melt(id_vars=["origLineID", "barrierID", "barrierIdx"], value_name="geometry")
+        .sort_values(by=["origLineID", "barrierIdx"])
+        .rename(columns={"variable": "side"})
+        .reset_index(drop=True)
+        .join(grouped[["barriers", "NHDPlusID"]], on="origLineID")
+    )
+
+    # label first and last barriers
+    new_segments["position"] = "middle"
+    new_segments.loc[new_segments.barrierIdx == 0, "position"] = "first"
+    new_segments.loc[
+        new_segments.barrierIdx == new_segments.barriers - 1, "position"
+    ] = "last"
+
+    # drop all upstream segments except for first postion, these are duplicates
+    new_segments["duplicate"] = False
+    new_segments.loc[
+        (new_segments.side == "upstream") & (new_segments.position != "first"),
+        "duplicate",
+    ] = True
+
+    new_segments = new_segments.loc[~new_segments.duplicate].reset_index(drop=True)
+
+    # generate a new ID for each segment
+    new_segments["lineID"] = next_segment_id + new_segments.index
+
+    # Add in new flowlines
+    new_flowlines = prep_new_flowlines(flowlines, new_segments)
+    updated_flowlines.append(new_flowlines, ignore_index=True, sort=False).set_index(
+        "lineID", drop=False
+    )
+
+    # update joins
+    # NOTE: these are from the perspective of the line segment that was split
+    # and only for the furthest barrier upstream or downstream per segment
+    new_downstreams = (
+        new_segments.loc[
+            (new_segments.side == "upstream") & (new_segments.position == "first")
+        ]
+        .set_index("origLineID")
+        .lineID.rename("new_downstream_id")
+    )
+    new_upstreams = (
+        new_segments.loc[
+            (new_segments.side == "downstream") & (new_segments.position == "last")
+        ]
+        .set_index("origLineID")
+        .lineID.rename("new_upstream_id")
+    )
+
+    updated_joins = update_joins(updated_joins, new_downstreams, new_upstreams)
+
+    # Add in new joins for the splits
+    new_joins = new_segments[
+        ["NHDPlusID", "lineID", "barrierID", "side", "position", "barrierIdx"]
+    ]
+
+    # add in joins across the barriers in this segment
+    ids = (
+        new_joins.loc[
+            (new_joins.side == "downstream") & (new_joins.position != "first")
+        ]
+        .barrierID.copy()
+        .values
+    )
+    idx = (new_joins.side == "downstream") & (new_joins.position != "last")
+    new_joins.loc[idx, "position"] = "middle"
+    internal_upstreams = new_joins.loc[idx].copy()
+    internal_upstreams.side = "upstream"
+    internal_upstreams.position = "middle"
+    # set the ID for the barrier on the downstream side
+    internal_upstreams.barrierID = ids
+
+    new_joins = new_joins.append(internal_upstreams, ignore_index=True, sort=False)[
+        ["NHDPlusID", "lineID", "barrierID", "side"]
+    ].sort_values(by=["lineID", "barrierID"])
+
+    # pivot to create columns for upstream / downstream ids
+    new_joins = new_joins.pivot(index="barrierID", columns="side")
+    new_joins.columns = ["downstream", "upstream", "downstream_id", "upstream_id"]
+    new_joins["type"] = "internal"
+
+    updated_joins = updated_joins.append(new_joins, ignore_index=True, sort=False)
+
+    #### Update Barrier joins
+    barrier_joins.update(new_joins)
 
     return updated_flowlines, updated_joins, barrier_joins
 
