@@ -43,7 +43,8 @@ def extract_flowlines(gdb_path, target_crs):
     gdb_path : str
         path to the NHD HUC4 Geodatabase
     target_crs: GeoPandas CRS object
-        target CRS to project NHD to for analysis.  Must be a planar projection.
+        target CRS to project NHD to for analysis, like length calculations.  
+        Must be a planar projection.
 
     Returns
     -------
@@ -75,11 +76,14 @@ def extract_flowlines(gdb_path, target_crs):
     df = df.join(vaa_df, how="inner")
     print("{} features after join to VAA".format(len(df)))
 
+    # Rename fields
+    df = df.rename(columns={"StreamOrde": "streamorder"})
+
     # Filter out loops (query came from Kat) and other segments we don't want.
     # 566 is coastlines type.
     print("Filtering out loops and coastlines")
     removed = df.loc[
-        (df.StreamOrde != df.StreamCalc) | (df.FlowDir.isnull()) | (df.FType == 566)
+        (df.streamorder != df.StreamCalc) | (df.FlowDir.isnull()) | (df.FType == 566)
     ]
     df = df.loc[~df.index.isin(removed.index)].copy()
     print("{} features after removing loops and coastlines".format(len(df)))
@@ -115,7 +119,11 @@ def extract_flowlines(gdb_path, target_crs):
     df["sinuosity"] = df.geometry.apply(calculate_sinuosity).astype("float32")
 
     # Drop columns we don't need any more for faster I/O
-    df = df.drop(columns=["FlowDir", "TotDASqKm", "StreamCalc"])
+    df = df.drop(columns=["FlowDir", "StreamCalc"])
+
+    # Simplify data types for smaller files and faster IO
+    df.FType = df.FType.astype("uint16")
+    df.streamorder = df.streamorder.astype("uint8")
 
     ############# Connections between segments ###################
     print("Reading segment connections")

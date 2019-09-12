@@ -126,6 +126,11 @@ def deserialize_gdf(path):
 
 
 def to_shp(df, path):
+    # Convert data types to those supported by shapefile
+    df = df.copy()
+    for c in [c for c, t in df.dtypes.items() if t == "uint64"]:
+        df[c] = df[c].astype("float64")
+
     geom_col = df._geometry_column_name
     prop_cols = [c for c in df.columns if c != geom_col]
     # Drop any records with missing geometries
@@ -148,7 +153,7 @@ def to_shp(df, path):
 
 
 def serialize_sindex(df, path):
-    """Serilize the bounding coordinates necessary to recreate a spatial index
+    """Serialize the bounding coordinates necessary to recreate a spatial index
 
     Parameters
     ----------
@@ -157,7 +162,7 @@ def serialize_sindex(df, path):
     path : str
         path to write spatial index
     """
-    geom_col = df._geometry_column_name
+
     df = df[["geometry"]].join(df.geometry.bounds.astype("float32"))
     df = df.reset_index(drop=not df.index.name)
     serialize_df(df.drop(columns=["geometry"]), path)
