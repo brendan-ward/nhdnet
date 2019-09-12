@@ -48,6 +48,21 @@ def update_joins(joins, new_downstreams, new_upstreams):
 
 
 def prep_new_flowlines(flowlines, new_segments):
+    """Add necessary attributes to new segments then append to flowlines and return.
+    
+    Calculates length and sinuosity for new segments.
+
+    Parameters
+    ----------
+    flowlines : GeoDataFrame
+        flowlines to append to
+    new_segments : GeoDataFrame
+        new segments to append to flowlines.
+    
+    Returns
+    -------
+    GeoDataFrame
+    """
     # join in data from flowlines into new segments
     new_flowlines = new_segments.join(
         flowlines[["NHDPlusID", "sizeclass", "streamorder"]], on="origLineID"
@@ -71,6 +86,25 @@ def prep_new_flowlines(flowlines, new_segments):
 
 
 def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
+    """Cut flowlines by barriers.
+    
+    Parameters
+    ----------
+    flowlines : GeoDataFrame
+        ALL flowlines for region.
+    barriers : GeoDataFrame
+        Barriers that will be used to cut flowlines.
+    joins : DataFrame
+        Joins between flowlines (upstream, downstream pairs).
+    next_segment_id : int, optional
+        Used as starting point for IDs of new segments created by cutting flowlines.
+    
+    Returns
+    -------
+    GeoDataFrame, DataFrame, DataFrame
+        updated flowlines, updated joins, barrier joins (upstream / downstream flowline ID per barrier)
+    """
+
     print("Starting number of segments: {:,}".format(len(flowlines)))
     print("Cutting in {:,} barriers".format(len(barriers)))
 
