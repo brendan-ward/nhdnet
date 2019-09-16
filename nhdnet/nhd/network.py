@@ -12,56 +12,53 @@ def generate_network(root_id, upstreams):
     root_id : id type (int, str)
         starting segment id that forms the root node of the upstream network
     upstreams : dict
-        dictionary containing the list of upstream segment ids for each segment
+        Dictionary created from Pandas groupby().groups - keys are downstream_ids, values are upstream_ids
     
     Returns
     -------
     list of all upstream ids in network traversing upward from root_id
     """
 
+    network = [root_id]
     ids = [root_id]
-    network = []
-    while ids:
-        network.extend(ids)
+    while len(ids):
         upstream_ids = []
         for id in ids:
             upstream_ids.extend(upstreams.get(id, []))
+
         ids = upstream_ids
+        network.extend(ids)
+
     return network
 
 
-def generate_networks(df, upstreams, column="upstream_id"):
-    """Generate the upstream networks for each record in the input data frame.
+def generate_networks(root_ids, upstreams):
+    """Generate the upstream networks for each root ID in root_ids.
     IMPORTANT: this will produce multiple upstream networks from a given starting point
     if the starting point is located at the junction of multiple upstream networks.
     
     Parameters
     ----------
-    df : pandas.DataFrame
-        data frame containing the ids that are the root of each upstream network
+    root_ids : pandas.Series
+        Series of root IDs (downstream-most ID) for each network to be created
     upstreams : dict
-        dictionary containing the list of upstream segment ids for each segment
-    column : str
-        the name of the column containing the ids from which to traverse the network upstream
+        Dictionary created from Pandas groupby().groups - keys are downstream_ids, values are upstream_ids
     
     Returns
     -------
     pandas.DataFrame
-        contains all columns from df plus networkID.  Indexed on the values of df[column]
+        Contains networkID based on the value in root_id for each network, and the associated lineIDs in that network
     """
 
-    df["network"] = df[column].apply(lambda id: generate_network(id, upstreams))
+    # create the list of upstream segments per root ID
+    network_segments = root_ids.apply(
+        lambda id: generate_network(id, upstreams)
+    ).rename("lineID")
 
-    # Pivot the lists back into a flat data frame:
-    # adapted from: https://stackoverflow.com/a/48532692
-    return (
-        pd.DataFrame(
-            {
-                c: np.repeat(df[c].values, df["network"].apply(len))
-                for c in df.columns.drop("network")
-            }
-        )
-        .assign(**{"network": np.concatenate(df["network"].values)})
-        .rename(columns={column: "networkID"})
-        .set_index("network")
+    # transform into a flat dataframe, with one entry per lineID in each network
+    return pd.DataFrame(
+        {
+            "networkID": np.repeat(root_ids, network_segments.apply(len)),
+            "lineID": np.concatenate(network_segments.values),
+        }
     )
