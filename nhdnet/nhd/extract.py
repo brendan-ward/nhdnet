@@ -69,6 +69,7 @@ def extract_flowlines(gdb_path, target_crs):
 
     # Read in VAA and convert to data frame
     # NOTE: not all records in Flowlines have corresponding records in VAA
+    # we drop those that do not since we need these fields.
     print("Reading VAA table and joining...")
     vaa_df = gp.read_file(gdb_path, layer="NHDPlusFlowlineVAA")[VAA_COLS]
     vaa_df.NHDPlusID = vaa_df.NHDPlusID.astype("uint64")
@@ -82,10 +83,11 @@ def extract_flowlines(gdb_path, target_crs):
     # Filter out loops (query came from Kat) and other segments we don't want.
     # 566 is coastlines type.
     print("Filtering out loops and coastlines")
-    removed = df.loc[
+    coastline_idx = df.loc[(df.FType == 566)].index
+    removed_idx = df.loc[
         (df.streamorder != df.StreamCalc) | (df.FlowDir.isnull()) | (df.FType == 566)
-    ]
-    df = df.loc[~df.index.isin(removed.index)].copy()
+    ].index
+    df = df.loc[~df.index.isin(removed_idx)].copy()
     print("{} features after removing loops and coastlines".format(len(df)))
 
     # Calculate size classes
@@ -133,9 +135,21 @@ def extract_flowlines(gdb_path, target_crs):
     join_df.upstream = join_df.upstream.astype("uint64")
     join_df.downstream = join_df.downstream.astype("uint64")
 
-    # remove any joins to or from segments we removed above
+    # remove any joins that have coastlines as upstream
+    # these are themselves coastline segments
+    join_df = join_df.loc[~join_df.upstream.isin(coastline_idx)].copy()
+
+    # set the downstream to 0 for any that join coastlines
+    # this will enable us to mark these as downstream terminals in
+    # the network analysis later
+    join_df.loc[join_df.downstream.isin(coastline_idx), "downstream"] = 0
+
+    # drop any duplicates (above operation sets some joins to upstream and downstream of 0)
+    join_df = join_df.drop_duplicates()
+
+    # remove any other joins to or from segments we removed above
     join_df = join_df.loc[
-        ~(join_df.upstream.isin(removed.index) | join_df.downstream.isin(removed.index))
+        ~(join_df.upstream.isin(removed_idx) | join_df.downstream.isin(removed_idx))
     ]
 
     # update joins with our ids

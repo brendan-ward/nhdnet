@@ -1,5 +1,6 @@
 from shutil import copyfileobj
 import requests
+from requests import HTTPError
 
 
 ### NHDPlus High Resolution
@@ -19,6 +20,9 @@ def download_huc4(HUC4, filename):
     """
 
     with requests.get(DATA_URL.format(HUC4=HUC4), stream=True) as r:
+        if not r.status_code == 200:
+            raise HTTPError("Could not download {}".format(HUC4))
+
         with open(filename, "wb") as out:
             print(
                 "Downloading HUC4: {HUC4} ({size:.2f} MB)".format(
