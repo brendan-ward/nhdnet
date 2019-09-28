@@ -283,7 +283,7 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     new_joins["type"] = "internal"
 
     updated_joins = updated_joins.append(
-        new_joins[["upstream", "downstream", "upstream_id", "downstream_id"]],
+        new_joins[["upstream", "downstream", "upstream_id", "downstream_id", "type"]],
         ignore_index=True,
         sort=False,
     ).sort_values(["downstream_id", "upstream_id"])

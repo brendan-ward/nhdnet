@@ -65,7 +65,7 @@ def extract_flowlines(gdb_path, target_crs):
     df.NHDPlusID = df.NHDPlusID.astype("uint64")
     df = df.set_index(["NHDPlusID"], drop=False)
 
-    print("Read {} flowlines".format(len(df)))
+    print("Read {:,} flowlines".format(len(df)))
 
     # Read in VAA and convert to data frame
     # NOTE: not all records in Flowlines have corresponding records in VAA
@@ -75,7 +75,7 @@ def extract_flowlines(gdb_path, target_crs):
     vaa_df.NHDPlusID = vaa_df.NHDPlusID.astype("uint64")
     vaa_df = vaa_df.set_index(["NHDPlusID"])
     df = df.join(vaa_df, how="inner")
-    print("{} features after join to VAA".format(len(df)))
+    print("{:,} features after join to VAA".format(len(df)))
 
     # Rename fields
     df = df.rename(columns={"StreamOrde": "streamorder"})
@@ -88,7 +88,7 @@ def extract_flowlines(gdb_path, target_crs):
         (df.streamorder != df.StreamCalc) | (df.FlowDir.isnull()) | (df.FType == 566)
     ].index
     df = df.loc[~df.index.isin(removed_idx)].copy()
-    print("{} features after removing loops and coastlines".format(len(df)))
+    print("{:,} features after removing loops and coastlines".format(len(df)))
 
     # Calculate size classes
     print("Calculating size class")

@@ -93,6 +93,38 @@ def deserialize_df(path):
     return read_dataframe(path)
 
 
+def deserialize_dfs(paths, src=None):
+    """Deserialize multiple pandas.DataFrames stored in feather files.
+    
+    Parameters
+    ----------
+    paths : str
+        iterable of paths to feather files
+    src : list (optional)
+        if present, must be same length as paths, and will be used to set a 'src'
+        column in the output data frame
+    
+    Returns
+    -------
+    pandas.DataFrame
+    """
+
+    merged = None
+    for index, path in enumerate(paths):
+        df = deserialize_df(path)
+
+        if src is not None:
+            df["src"] = src[index]
+
+        if merged is None:
+            merged = df
+
+        else:
+            merged = merged.append(df, ignore_index=True, sort=False)
+
+    return merged
+
+
 def deserialize_gdf(path):
     """Deserialize a geopandas.GeoDataFrame stored in a feather file.
 
@@ -123,6 +155,39 @@ def deserialize_gdf(path):
     df = read_dataframe(path)
     df["geometry"] = df.wkb.apply(lambda wkb: loads(wkb))
     return GeoDataFrame(df.drop(columns=["wkb"]), geometry="geometry", crs=crs)
+
+
+def deserialize_gdfs(paths, src=None):
+    """Deserialize multiple geopandas.GeoDataFrames stored in feather files.
+    
+    Parameters
+    ----------
+    paths : str
+        iterable of paths to feather files
+    src : list (optional)
+        if present, must be same length as paths, and will be used to set a 'src'
+        column in the output data frame
+    
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+    """
+
+    merged = None
+    for index, path in enumerate(paths):
+        df = deserialize_gdf(path)
+
+        if src is not None:
+            df["src"] = src[index]
+
+        if merged is None:
+            merged = df
+
+        else:
+            merged = merged.append(df, ignore_index=True, sort=False)
+
+    return merged
 
 
 def to_shp(df, path):
