@@ -2,8 +2,10 @@
 import os
 import json
 import numpy as np
+import warnings
 from pandas import DataFrame
 from feather import read_dataframe
+from geofeather import to_geofeather, from_geofeather
 from geopandas import GeoDataFrame
 from geopandas.io.file import infer_schema
 from shapely.wkb import loads
@@ -53,26 +55,12 @@ def serialize_gdf(df, path, index=True):
         if False, will drop the index
     """
 
-    # TODO: save an attribute indicating the index col?
+    warnings.warn(
+        "serialize_gdf() is deprecated.  Use geofeather::to_geofeather() instead",
+        DeprecationWarning,
+    )
 
-    # write the crs to an associated file
-    if df.crs:
-        with open("{}.crs".format(path), "w") as crsfile:
-            crs = df.crs
-            if isinstance(crs, str):
-                crs = {"proj4": crs}
-            crsfile.write(json.dumps(crs))
-
-    df = df.copy()
-
-    # If df has a non-default index, convert it back to a column
-    # if the associated column is not found
-    if df.index.name or not index:
-        df.reset_index(inplace=True, drop=not index or df.index.name in df.columns)
-
-    df["wkb"] = df.geometry.apply(lambda g: g.to_wkb())
-    df = df.drop(columns=["geometry"])
-    df.to_feather(path)
+    to_geofeather(df, path)
 
 
 def deserialize_df(path):
@@ -145,16 +133,12 @@ def deserialize_gdf(path):
     geopandas.GeoDataFrame
     """
 
-    crs = None
-    crsfilename = "{}.crs".format(path)
-    if os.path.exists(crsfilename):
-        crs = json.loads(open(crsfilename).read())
-        if "proj4" in crs:
-            crs = crs["proj4"]
+    warnings.warn(
+        "deserialize_gdf() is deprecated.  Use geofeather::to_geofeather() instead",
+        DeprecationWarning,
+    )
 
-    df = read_dataframe(path)
-    df["geometry"] = df.wkb.apply(lambda wkb: loads(wkb))
-    return GeoDataFrame(df.drop(columns=["wkb"]), geometry="geometry", crs=crs)
+    return from_geofeather(path)
 
 
 def deserialize_gdfs(paths, src=None):
@@ -191,30 +175,33 @@ def deserialize_gdfs(paths, src=None):
 
 
 def to_shp(df, path):
+    geom_col = df._geometry_column_name
+
+    # Drop any records with missing geometries
+    df = df.loc[~df[geom_col].isnull()].copy()
+
     # Convert data types to those supported by shapefile
-    df = df.copy()
     for c in [c for c, t in df.dtypes.items() if t == "uint64"]:
         df[c] = df[c].astype("float64")
 
-    geom_col = df._geometry_column_name
-    prop_cols = [c for c in df.columns if c != geom_col]
-    # Drop any records with missing geometries
-    df = df.loc[~df[geom_col].isnull()].copy()
-    geometry = df[geom_col].apply(mapping)
-    # fill missing data with None and convert to dict
-    props = df.drop(columns=[df._geometry_column_name])
-    props.replace({c: {np.nan: None} for c in prop_cols}, inplace=True)
-    props = props.apply(lambda row: row.to_dict(), axis=1)
-    # Convert features to JSON
-    features = DataFrame({"geometry": geometry, "properties": props})
-    features["type"] = "Feature"
-    features = features.apply(lambda row: row.to_dict(), axis=1)
-    schema = infer_schema(df)
-    with fiona.Env():
-        with fiona.open(
-            path, "w", driver="ESRI Shapefile", crs=df.crs, schema=schema
-        ) as writer:
-            writer.writerecords(features)
+    df.to_file(path)
+
+    ### Original implementation, now slower than geopandas to_file()
+    # geometry = df[geom_col].apply(mapping)
+    # # fill missing data with None and convert to dict
+    # props = df.drop(columns=[df._geometry_column_name])
+    # props.replace({c: {np.nan: None} for c in prop_cols}, inplace=True)
+    # props = props.apply(lambda row: row.to_dict(), axis=1)
+    # # Convert features to JSON
+    # features = DataFrame({"geometry": geometry, "properties": props})
+    # features["type"] = "Feature"
+    # features = features.apply(lambda row: row.to_dict(), axis=1)
+    # schema = infer_schema(df)
+    # with fiona.Env():
+    #     with fiona.open(
+    #         path, "w", driver="ESRI Shapefile", crs=df.crs, schema=schema
+    #     ) as writer:
+    #         writer.writerecords(features)
 
 
 def serialize_sindex(df, path):

@@ -32,7 +32,7 @@ FLOWLINE_COLS = ["NHDPlusID", "FlowDir", "FType", "GNIS_ID", "GNIS_Name", "geome
 VAA_COLS = ["NHDPlusID", "StreamOrde", "StreamCalc", "TotDASqKm"]
 
 
-def extract_flowlines(gdb_path, target_crs):
+def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     """
     Extracts data from NHDPlusHR data product.
     Extract flowlines, join to VAA table, and filter out any loops and coastlines.
@@ -45,6 +45,8 @@ def extract_flowlines(gdb_path, target_crs):
     target_crs: GeoPandas CRS object
         target CRS to project NHD to for analysis, like length calculations.  
         Must be a planar projection.
+    extra_cols: list
+        List of extra field names to extract from NHDFlowline layer
 
     Returns
     -------
@@ -55,7 +57,9 @@ def extract_flowlines(gdb_path, target_crs):
     # Read in data and convert to data frame (no need for geometry)
     print("Reading flowlines")
 
-    df = gp.read_file(gdb_path, layer="NHDFlowline")[FLOWLINE_COLS]
+    flowline_cols = FLOWLINE_COLS + extra_flowline_cols
+
+    df = gp.read_file(gdb_path, layer="NHDFlowline")[flowline_cols]
 
     # Set our internal master IDs to the original index of the file we start from
     # Assume that we can always fit into a uint32, which is ~400 million records

@@ -10,10 +10,14 @@ nhdnet = {editable = true,path = "."}
 feather-format = "*"
 fuzzywuzzy = {version = "*",extras = ["speedup"]}
 requests = "*"
+geofeather = "*"
 
 [dev-packages]
 pylint = "*"
 black = "==19.3b0"
+pytest = "*"
+pytest-cov = "*"
+pytest-benchmark = "*"
 
 [requires]
 python_version = "3.7"
