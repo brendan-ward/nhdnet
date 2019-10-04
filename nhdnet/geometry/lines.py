@@ -50,7 +50,7 @@ def calculate_sinuosity(geometry):
     return 1  # if there is no straight line distance, there is no sinuosity
 
 
-def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False, sindex=None):
+def snap_to_line(points, lines, tolerance=100, sindex=None):
     """
     Attempt to snap a line to the nearest line, within tolerance distance.
 
@@ -65,10 +65,6 @@ def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False, sindex=Non
         lines to snap against 
     tolerance : int, optional (default: 100)
         maximum distance between line and point that can still be snapped
-    prefer_endpoint : bool, optional (default False)
-        if True, will try to match to the nearest endpoint on the nearest line
-        provided that the distance to that endpoint is less than tolerance.
-        NOTE: NOT YET WORKING PROPERLY - DO NOT USE!
 
     Returns
     -------
@@ -78,12 +74,94 @@ def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False, sindex=Non
         * geometry: snapped geometry
         * snap_dist: distance between original point and snapped location
         * nearby: number of nearby lines within tolerance
-        * is_endpoint: True if successfully snapped to endpoint
+        * any columns joined from lines
+    """
+
+    line_columns = lines.columns[lines.columns != "geometry"].to_list()
+    columns = ["geometry", "snap_dist", "nearby"] + line_columns
+
+    # generate spatial index if it is missing
+    if sindex is None:
+        sindex = lines.sindex
+        # Note: the spatial index is ALWAYS based on the integer index of the
+        # geometries and NOT their index
+
+    # generate a window around each point
+    window = points.bounds + [-tolerance, -tolerance, tolerance, tolerance]
+    # get a list of the line ordinal line indexes (integer index, not actual index) for each window
+    # points['line_hits'] =
+    hits = window.apply(lambda row: list(sindex.intersection(row)), axis=1)
+
+    # transpose from a list of hits to one entry per hit
+    # this implicitly drops any that did not get hits
+    tmp = pd.DataFrame(
+        {
+            # index of points table
+            "pt_idx": np.repeat(hits.index, hits.apply(len)),
+            # ordinal position of line - access via iloc
+            "line_i": np.concatenate(hits.values),
+        }
+    )
+
+    # reset the index on lines to get ordinal position, and join to lines and points
+    tmp = tmp.join(lines.reset_index(drop=True), on="line_i").join(
+        points.geometry.rename("point"), on="pt_idx"
+    )
+    tmp = gp.GeoDataFrame(tmp, geometry="geometry", crs=points.crs)
+    tmp["snap_dist"] = tmp.geometry.distance(gp.GeoSeries(tmp.point))
+
+    # drop any that are beyond tolerance and sort by distance
+    tmp = tmp.loc[tmp.snap_dist <= tolerance].sort_values(by=["pt_idx", "snap_dist"])
+
+    # find the nearest line for every point, and count number of lines that are within tolerance
+    by_pt = tmp.groupby("pt_idx")
+    closest = gp.GeoDataFrame(
+        by_pt.first().join(by_pt.size().rename("nearby")), geometry="geometry"
+    )
+
+    # now snap to the line
+    # project() calculates the distance on the line closest to the point
+    # interpolate() generates the point actually on the line at that point
+    snapped_pt = closest.interpolate(
+        closest.geometry.project(gp.GeoSeries(closest.point))
+    )
+    snapped = gp.GeoDataFrame(
+        closest[line_columns + ["snap_dist", "nearby"]], geometry=snapped_pt
+    )
+
+    # NOTE: this drops any points that didn't get snapped
+    return points.drop(columns=["geometry"]).join(snapped).dropna(subset=["geometry"])
+
+
+def snap_to_line_old(points, lines, tolerance=100, sindex=None):
+    """
+    Attempt to snap a line to the nearest line, within tolerance distance.
+
+    Lines must be in a planar (not geographic) projection and points 
+    must be in the same projection.
+
+    Parameters
+    ----------
+    points : GeoPandas.DataFrame
+        points to snap
+    lines : GeoPandas.DataFrame
+        lines to snap against 
+    tolerance : int, optional (default: 100)
+        maximum distance between line and point that can still be snapped
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        output data frame containing: 
+        * all columns from points except geometry
+        * geometry: snapped geometry
+        * snap_dist: distance between original point and snapped location
+        * nearby: number of nearby lines within tolerance
         * any columns joined from lines
     """
 
     line_columns = list(set(lines.columns).difference({"geometry"}))
-    columns = ["geometry", "snap_dist", "nearby", "is_endpoint"] + line_columns
+    columns = ["geometry", "snap_dist", "nearby"] + line_columns
 
     def snap(point):
         # point = record.geometry
@@ -105,24 +183,10 @@ def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False, sindex=Non
             line = closest.geometry
 
             dist = closest.dist
-            snapped = None
-            is_endpoint = False
-            if prefer_endpoint:
-                # snap to the nearest endpoint if it is within tolerance
-                endpoints = [
-                    (pt, point.distance(pt))
-                    for pt in (Point(line.coords[0]), Point(line.coords[-1]))
-                    if point.distance(pt) < tolerance
-                ]
-                endpoints = sorted(endpoints, key=lambda x: x[1])
-                if endpoints:
-                    snapped, dist = endpoints[0]
-                    is_endpoint = True
 
-            if snapped is None:
-                snapped = line.interpolate(line.project(point))
+            snapped = line.interpolate(line.project(point))
 
-            values = [snapped, dist, len(within_tolerance), int(is_endpoint)]
+            values = [snapped, dist, len(within_tolerance)]
 
             # Copy attributes from line to point
             values.extend([closest[c] for c in line_columns])
@@ -130,7 +194,6 @@ def snap_to_line(points, lines, tolerance=100, prefer_endpoint=False, sindex=Non
             return gp.GeoSeries(values, index=columns)
 
         # create empty record
-        # return pd.Series(([None] * 4) + [None for c in line_columns], index=columns)
         return pd.Series([None] * len(columns), index=columns)
 
     if sindex is None:
