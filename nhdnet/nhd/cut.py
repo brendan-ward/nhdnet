@@ -114,7 +114,7 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
 
     # join barriers to lines and extract those that have segments (via inner join)
     barrier_segments = flowlines[["lineID", "NHDPlusID", "geometry"]].join(
-        barriers[["geometry", "barrierID", "lineID"]].set_index("lineID"),
+        barriers[["geometry", "barrierID", "lineID"]].set_index("lineID", drop=False),
         rsuffix="_barrier",
         how="inner",
     )
@@ -144,10 +144,10 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     # NOTE: a barrier may have multiple upstreams if it occurs at a fork in the network.
     # All terminal upstreams should be already coded as 0 in joins, but just in case
     # we assign N/A to 0.
-    upstream_barrier_joins = (
+    upstream_barrier_joins = pd.DataFrame(
         barrier_segments.loc[barrier_segments.on_upstream, ["barrierID", "lineID"]]
         .rename(columns={"lineID": "downstream_id"})
-        .join(joins.set_index("downstream_id").upstream_id, on="lineID")
+        .join(joins.set_index("downstream_id").upstream_id, on="downstream_id")
     ).fillna(0)
 
     # Barriers on downstream endpoint:
@@ -156,10 +156,10 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     # Some downstream_ids may be missing if the barrier is on the downstream-most point of the
     # network (downstream terminal) and further downstream segments were removed due to removing
     # coastline segments.
-    downstream_barrier_joins = (
+    downstream_barrier_joins = pd.DataFrame(
         barrier_segments.loc[barrier_segments.on_downstream, ["barrierID", "lineID"]]
         .rename(columns={"lineID": "upstream_id"})
-        .join(joins.set_index("upstream_id").downstream_id, on="lineID")
+        .join(joins.set_index("upstream_id").downstream_id, on="upstream_id")
     ).fillna(0)
 
     barrier_joins = upstream_barrier_joins.append(

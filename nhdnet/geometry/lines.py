@@ -77,8 +77,8 @@ def snap_to_line(points, lines, tolerance=100, sindex=None):
         * any columns joined from lines
     """
 
+    # get list of columns to copy from flowlines
     line_columns = lines.columns[lines.columns != "geometry"].to_list()
-    columns = ["geometry", "snap_dist", "nearby"] + line_columns
 
     # generate spatial index if it is missing
     if sindex is None:
