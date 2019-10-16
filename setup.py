@@ -7,13 +7,10 @@ here = path.abspath(path.dirname(__file__))
 with open(path.join(here, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
-# Arguments marked as "Required" below must be included for upload to PyPI.
-# Fields marked as "Optional" may be commented out.
-
 setup(
     name="nhdnet",
-    version="0.0.1",
-    description="US National Hydrography Dataset Barrier Analysis Tools",
+    version="0.2.0",
+    description="US National Hydrography Dataset Network and Barrier Analysis Tools",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/brendan-ward/nhdnet",
@@ -25,6 +22,6 @@ setup(
     ],
     keywords="nhd hydrography",
     packages=find_packages(exclude=["docs", "tests"]),
-    install_requires=["pandas", "geopandas", "rtree"],
+    install_requires=["pandas", "geopandas", "rtree", "geofeather", "requests"],
     extras_require={"dev": ["black", "pylint"], "test": ["pytest", "pytest-cov"]},
 )
