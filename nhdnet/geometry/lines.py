@@ -6,12 +6,12 @@ from shapely.geometry import Point, LineString, MultiLineString
 
 def to2D(geometry):
     """Flatten a 3D line to 2D.
-    
+
     Parameters
     ----------
     geometry : LineString
         Input 3D geometry
-    
+
     Returns
     -------
     LineString
@@ -30,11 +30,11 @@ def calculate_sinuosity(geometry):
 
     This is the length of the line divided by the distance between the endpoints of the line.
     By definition, it is always >=1.
-    
+
     Parameters
     ----------
     geometry : LineString
-    
+
     Returns
     -------
     float
@@ -54,7 +54,7 @@ def snap_to_line(points, lines, tolerance=100, sindex=None):
     """
     Attempt to snap a line to the nearest line, within tolerance distance.
 
-    Lines must be in a planar (not geographic) projection and points 
+    Lines must be in a planar (not geographic) projection and points
     must be in the same projection.
 
     Parameters
@@ -62,14 +62,14 @@ def snap_to_line(points, lines, tolerance=100, sindex=None):
     points : GeoPandas.DataFrame
         points to snap
     lines : GeoPandas.DataFrame
-        lines to snap against 
+        lines to snap against
     tolerance : int, optional (default: 100)
         maximum distance between line and point that can still be snapped
 
     Returns
     -------
     geopandas.GeoDataFrame
-        output data frame containing: 
+        output data frame containing:
         * all columns from points except geometry
         * geometry: snapped geometry
         * snap_dist: distance between original point and snapped location
@@ -89,7 +89,6 @@ def snap_to_line(points, lines, tolerance=100, sindex=None):
     # generate a window around each point
     window = points.bounds + [-tolerance, -tolerance, tolerance, tolerance]
     # get a list of the line ordinal line indexes (integer index, not actual index) for each window
-    # points['line_hits'] =
     hits = window.apply(lambda row: list(sindex.intersection(row)), axis=1)
 
     # transpose from a list of hits to one entry per hit
@@ -137,7 +136,7 @@ def snap_to_line_old(points, lines, tolerance=100, sindex=None):
     """
     Attempt to snap a line to the nearest line, within tolerance distance.
 
-    Lines must be in a planar (not geographic) projection and points 
+    Lines must be in a planar (not geographic) projection and points
     must be in the same projection.
 
     Parameters
@@ -145,14 +144,14 @@ def snap_to_line_old(points, lines, tolerance=100, sindex=None):
     points : GeoPandas.DataFrame
         points to snap
     lines : GeoPandas.DataFrame
-        lines to snap against 
+        lines to snap against
     tolerance : int, optional (default: 100)
         maximum distance between line and point that can still be snapped
 
     Returns
     -------
     geopandas.GeoDataFrame
-        output data frame containing: 
+        output data frame containing:
         * all columns from points except geometry
         * geometry: snapped geometry
         * snap_dist: distance between original point and snapped location
@@ -215,7 +214,7 @@ def cut_line_at_point(line, point):
     ----------
     line : shapely.LineString
     point : shapely.Point
-    
+
     Returns
     -------
     list of LineStrings
@@ -241,14 +240,14 @@ def cut_line_at_point(line, point):
 def cut_line_at_points(line, points):
     """
     Cut a line geometry by multiple points.
-    
+
     Parameters
     ----------
     line : shapely.LineString
-    points : iterable of shapely.Point objects.  
+    points : iterable of shapely.Point objects.
         Must be ordered from the start of the line to the end.
-       
-    
+
+
     Returns
     -------
     list of shapely.LineString containing new segments

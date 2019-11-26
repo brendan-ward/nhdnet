@@ -18,7 +18,7 @@ def serialize_df(df, path, index=True):
     """Serializes a pandas DataFrame to a feather file on disk.
 
     If the data frame has a non-default index, that is added back as a column before writing out.
-    
+
     Parameters
     ----------
     df : pandas.DataFrame
@@ -45,7 +45,7 @@ def serialize_gdf(df, path, index=True):
     Internally, the geometry data are converted to WKB format.
 
     This also creates a .crs file with CRS information for this dataset
-    
+
     Parameters
     ----------
     df : geopandas.GeoDataFrame
@@ -63,27 +63,29 @@ def serialize_gdf(df, path, index=True):
     to_geofeather(df, path)
 
 
-def deserialize_df(path):
+def deserialize_df(path, columns=None):
     """Deserialize a pandas.DataFrame stored in a feather file.
 
     Note: no index is set on this after deserialization, that is the responsibility of the caller.
-    
+
     Parameters
     ----------
     path : str
         path to feather file to read
-    
+    columns : list-like (optional, default: None)
+        Subset of columns to read from the file.  If not provided, all columns are read.
+
     Returns
     -------
     pandas.DataFrame
     """
 
-    return read_dataframe(path)
+    return read_dataframe(path, columns=columns)
 
 
-def deserialize_dfs(paths, src=None):
+def deserialize_dfs(paths, src=None, columns=None):
     """Deserialize multiple pandas.DataFrames stored in feather files.
-    
+
     Parameters
     ----------
     paths : str
@@ -91,7 +93,9 @@ def deserialize_dfs(paths, src=None):
     src : list (optional)
         if present, must be same length as paths, and will be used to set a 'src'
         column in the output data frame
-    
+    columns : list-like (optional, default: None)
+        Subset of columns to read from the file.  If not provided, all columns are read.
+
     Returns
     -------
     pandas.DataFrame
@@ -99,7 +103,7 @@ def deserialize_dfs(paths, src=None):
 
     merged = None
     for index, path in enumerate(paths):
-        df = deserialize_df(path)
+        df = deserialize_df(path, columns=columns)
 
         if src is not None:
             df["src"] = src[index]
@@ -113,7 +117,7 @@ def deserialize_dfs(paths, src=None):
     return merged
 
 
-def deserialize_gdf(path):
+def deserialize_gdf(path, columns=None):
     """Deserialize a geopandas.GeoDataFrame stored in a feather file.
 
     This converts the internal WKB representation back into geometry.
@@ -122,12 +126,14 @@ def deserialize_gdf(path):
     the GeoDataFrame.
 
     Note: no index is set on this after deserialization, that is the responsibility of the caller.
-    
+
     Parameters
     ----------
     path : str
         path to feather file to read
-    
+    columns : list-like (optional, default: None)
+        Subset of columns to read from the file.  If not provided, all columns are read.
+
     Returns
     -------
     geopandas.GeoDataFrame
@@ -138,12 +144,12 @@ def deserialize_gdf(path):
         DeprecationWarning,
     )
 
-    return from_geofeather(path)
+    return from_geofeather(path, columns=columns)
 
 
-def deserialize_gdfs(paths, src=None):
+def deserialize_gdfs(paths, src=None, columns=None):
     """Deserialize multiple geopandas.GeoDataFrames stored in feather files.
-    
+
     Parameters
     ----------
     paths : str
@@ -151,7 +157,9 @@ def deserialize_gdfs(paths, src=None):
     src : list (optional)
         if present, must be same length as paths, and will be used to set a 'src'
         column in the output data frame
-    
+    columns : list-like (optional, default: None)
+        Subset of columns to read from the file.  If not provided, all columns are read.
+
 
     Returns
     -------
@@ -160,7 +168,7 @@ def deserialize_gdfs(paths, src=None):
 
     merged = None
     for index, path in enumerate(paths):
-        df = deserialize_gdf(path)
+        df = deserialize_gdf(path, columns=columns)
 
         if src is not None:
             df["src"] = src[index]
