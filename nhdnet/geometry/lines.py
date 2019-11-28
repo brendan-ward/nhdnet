@@ -20,10 +20,6 @@ def to2D(geometry):
 
     return LineString(np.column_stack(geometry.xy))
 
-    # if geometry.type == "MultiLineString":
-    #     return MultiLineString([LineString(c[:2] for c in g.coords) for g in geometry])
-    # return LineString(c[:2] for c in geometry.coords)
-
 
 def calculate_sinuosity(geometry):
     """Calculate sinuosity of the line.
