@@ -4,6 +4,23 @@ import numpy as np
 from shapely.geometry import Point
 
 
+def to2D(geometry):
+    """Flatten a 3D point to 2D.
+
+    Parameters
+    ----------
+    geometry : Point
+        Input 3D geometry
+
+    Returns
+    -------
+    Point
+        Output 2D geometry
+    """
+
+    return Point(geometry.x, geometry.y)
+
+
 def create_points(df, x_column, y_column, crs):
     """Create a GeoDataFrame from pandas DataFrame
 

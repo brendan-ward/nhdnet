@@ -23,7 +23,8 @@ import os
 import geopandas as gp
 import pandas as pd
 from shapely.geometry import MultiLineString
-from nhdnet.geometry.lines import to2D, calculate_sinuosity
+from nhdnet.geometry.lines import to2D as line2D, calculate_sinuosity
+from nhdnet.geometry.polygons import to2D as poly2D
 from nhdnet.nhd.joins import index_joins, find_joins
 
 FLOWLINE_COLS = ["NHDPlusID", "FlowDir", "FType", "GNIS_ID", "GNIS_Name", "geometry"]
@@ -31,12 +32,15 @@ FLOWLINE_COLS = ["NHDPlusID", "FlowDir", "FType", "GNIS_ID", "GNIS_Name", "geome
 # TODO: add elevation gradient info
 VAA_COLS = ["NHDPlusID", "StreamOrde", "StreamCalc", "TotDASqKm"]
 
+WATERBODY_COLS = ["NHDPlusID", "FType", "AreaSqKm", "geometry"]
+
 
 def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     """
-    Extracts data from NHDPlusHR data product.
-    Extract flowlines, join to VAA table, and filter out any loops and coastlines.
-    Extract joins between flowlines, and filter out any loops and coastlines.
+    Extracts flowlines data from NHDPlusHR data product.
+    Extract flowlines from NHDPlusHR data product, joins to VAA table,
+    and filters out coastlines.
+    Extracts joins between flowlines, and filters out coastlines.
 
     Parameters
     ----------
@@ -50,7 +54,7 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
 
     Returns
     -------
-    type of geopandas.GeoDataFrame
+    tuple of (GeoDataFrame, DataFrame)
         (flowlines, joins)
     """
 
@@ -87,9 +91,6 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     ].rename(columns={"FromNHDPID": "upstream", "ToNHDPID": "downstream"})
     join_df.upstream = join_df.upstream.astype("uint64")
     join_df.downstream = join_df.downstream.astype("uint64")
-
-    # build join index
-    joins = index_joins(join_df)
 
     ### Label loops for easier removal later, if we need to
     # WARNING: loops may be very problematic from a network processing standpoint.
@@ -159,7 +160,7 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
 
     # Convert incoming data from XYZM to XY
     print("Converting geometry to 2D")
-    df.geometry = df.geometry.apply(to2D)
+    df.geometry = df.geometry.apply(line2D)
 
     print("projecting to target projection")
     df = df.to_crs(target_crs)
@@ -177,3 +178,50 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
 
     return df, join_df
 
+
+def extract_waterbodies(gdb_path, target_crs, exclude_ftypes=[], min_area=0):
+    """Extract waterbodies from NHDPlusHR data product.
+
+    Parameters
+    ----------
+    gdb_path : str
+        path to the NHD HUC4 Geodatabase
+    target_crs: GeoPandas CRS object
+        target CRS to project NHD to for analysis, like length calculations.
+        Must be a planar projection.
+    exclude_ftypes : list, optional (default: [])
+        list of FTypes to exclude.
+    min_area : int, optional (default: 0)
+        If provided, only waterbodies that are >= this value are retained
+
+    Returns
+    -------
+    GeoDataFrame
+    """
+    print("Reading waterbodies")
+    df = gp.read_file(gdb_path, layer="NHDWaterbody")[WATERBODY_COLS]
+    print("Read {:,} waterbodies".format(len(df)))
+
+    df = df.loc[
+        (df.AreaSqKm >= min_area) & (~df.FType.isin(exclude_ftypes))
+    ].reset_index(drop=True)
+    print(
+        "Retained {:,} waterbodies after dropping those below size threshold or in exclude FTypes".format(
+            len(df)
+        )
+    )
+
+    print("Converting geometry to 2D")
+    df.geometry = df.geometry.apply(poly2D)
+
+    print("projecting to target projection")
+    df = df.to_crs(target_crs)
+
+    df.NHDPlusID = df.NHDPlusID.astype("uint64")
+    df.AreaSqKm = df.AreaSqKm.astype("float32")
+    df.FType = df.FType.astype("uint16")
+
+    ### Add calculated fields
+    df["wbID"] = df.index.values.astype("uint32") + 1
+
+    return df
