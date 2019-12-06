@@ -138,15 +138,34 @@ def remove_joins(df, ids, downstream_col="downstream", upstream_col="upstream"):
     [type]
         [description]
     """
-    # TODO: fix new dangling terminals?  Set to 0 first?
-    # join_df = join_df.loc[~join_df.upstream.isin(coastline_idx)].copy()
 
-    # set the downstream to 0 for any that join coastlines
-    # this will enable us to mark these as downstream terminals in
-    # the network analysis later
-    # join_df.loc[join_df.downstream.isin(coastline_idx), "downstream"] = 0
+    # Update any joins that would have connected to these ids
+    # on their downstream end
+    upstreams = df.loc[
+        (df[downstream_col].isin(ids)) & (df[upstream_col] != 0), upstream_col
+    ]
+    has_other_joins = df.loc[
+        df[upstream_col].isin(upstreams) & ~df[downstream_col].isin(ids), upstream_col
+    ]
 
-    # drop any duplicates (above operation sets some joins to upstream and downstream of 0)
-    # join_df = join_df.drop_duplicates()
+    # new terminals are ones that end ONLY in these ids
+    new_terminals = upstreams.loc[~upstreams.isin(has_other_joins)]
+    ix = df.loc[df[upstream_col].isin(new_terminals)].index
+    df.loc[ix, downstream_col] = 0
 
-    return df.loc[~(df[upstream_col].isin(ids) | (df[downstream_col].isin(ids)))].copy()
+    # Update any joins that would have connected to these ids
+    # on their upstream end
+    downstreams = df.loc[
+        df[upstream_col].isin(ids) & (df[downstream_col] != 0), downstream_col
+    ]
+    has_other_joins = df.loc[
+        df[downstream_col].isin(downstreams) & ~df[upstream_col].isin(ids),
+        downstream_col,
+    ]
+    new_terminals = downstreams.loc[~downstreams.isin(has_other_joins)]
+    ix = df.loc[df[downstream_col].isin(new_terminals)].index
+    df.loc[ix, upstream_col] = 0
+
+    return df.loc[
+        ~(df[upstream_col].isin(ids) | (df[downstream_col].isin(ids)))
+    ].drop_duplicates()

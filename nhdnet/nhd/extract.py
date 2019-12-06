@@ -211,6 +211,11 @@ def extract_waterbodies(gdb_path, target_crs, exclude_ftypes=[], min_area=0):
         )
     )
 
+    # Convert multipolygons to polygons
+    # those we checked that are true multipolygons are errors
+    idx = df.loc[df.geometry.type == "MultiPolygon"].index
+    df.loc[idx, "geometry"] = df.loc[idx].geometry.apply(lambda g: g[0])
+
     print("Converting geometry to 2D")
     df.geometry = df.geometry.apply(poly2D)
 
