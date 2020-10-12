@@ -110,6 +110,36 @@ def add_lat_lon(df):
     return df.join(geo[["lat", "lon"]])
 
 
+def find_nearby(df, distance):
+    """Return indices of points within radius of each point.
+    This is symmetric, every original point will have a count of distances to
+    all other points.
+
+    Parameters
+    ----------
+    df : GeoDataFrame,
+    distance : number
+        radius within which to find nearby points
+
+    Returns
+    -------
+    GeoDataFrame
+        indexed according to the original index of the data frame, and
+        containing `index_right` for the index of the nearby featuers.
+    """
+    print("Creating buffers...")
+    buffers = df.copy()
+    buffers.geometry = buffers.geometry.buffer(distance)
+
+    print("Creating spatial indices for join...")
+    buffers.sindex
+    df.sindex
+
+    print("Joining buffers back to points...")
+    joined = gp.sjoin(buffers, df, op="intersects")
+    return joined.loc[joined.index != joined.index_right, ["index_right"]].copy()
+
+
 def count_nearby(df, distance):
     """Return count of points that are within a distance of each point.
     This is symmetric, every original point will have a count of distances to
@@ -127,18 +157,9 @@ def count_nearby(df, distance):
         count of points within distance of each original point, based on original index of GeoDataFrame
     """
 
-    print("Creating buffers...")
-    buffers = df.copy()
-    buffers.geometry = buffers.geometry.buffer(distance)
-
-    print("Creating spatial indices for join...")
-    buffers.sindex
-    df.sindex
-
-    print("Joining buffers back to points...")
-    joined = gp.sjoin(buffers, df, op="intersects")
-    joined = joined.loc[joined.index != joined.index_right]
-    return joined.groupby(level=0).index_right.size().rename("nearby")
+    return (
+        find_nearby(df, distance).groupby(level=0).index_right.size().rename("nearby")
+    )
 
 
 def snap_to_point(df, target_points, tolerance=100, sindex=None):

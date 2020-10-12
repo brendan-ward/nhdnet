@@ -8,48 +8,16 @@ from nhdnet.geometry.lines import (
     cut_line_at_point,
     calculate_sinuosity,
 )
+from nhdnet.nhd.joins import update_joins
 
 # Points within 1 meter of the end are close enough not to cut,
 # and instead get assigned to the endpoints
 EPS = 1
 
 
-def update_joins(joins, new_downstreams, new_upstreams):
-    """
-    Update new upstream and downstream segment IDs into joins table.
-
-    Parameters
-    ----------
-    joins : DataFrame
-        contains records with upstream_id and downstream_id representing joins between segments
-    new_dowstreams : Series
-        Series, indexed on original line ID, with the new downstream ID for each original line ID
-    new_upstreams : Series
-        Series, indexed on original line ID, with the new upstream ID for each original line ID
-    
-    Returns
-    -------
-    DataFrame
-    """
-
-    joins = joins.join(new_downstreams, on="downstream_id").join(
-        new_upstreams, on="upstream_id"
-    )
-
-    # copy new downstream IDs across
-    idx = joins.new_downstream_id.notnull()
-    joins.loc[idx, "downstream_id"] = joins[idx].new_downstream_id.astype("uint32")
-
-    # copy new upstream IDs across
-    idx = joins.new_upstream_id.notnull()
-    joins.loc[idx, "upstream_id"] = joins[idx].new_upstream_id.astype("uint32")
-
-    return joins.drop(columns=["new_downstream_id", "new_upstream_id"])
-
-
 def prep_new_flowlines(flowlines, new_segments):
     """Add necessary attributes to new segments then append to flowlines and return.
-    
+
     Calculates length and sinuosity for new segments.
 
     Parameters
@@ -58,14 +26,14 @@ def prep_new_flowlines(flowlines, new_segments):
         flowlines to append to
     new_segments : GeoDataFrame
         new segments to append to flowlines.
-    
+
     Returns
     -------
     GeoDataFrame
     """
     # join in data from flowlines into new segments
     new_flowlines = new_segments.join(
-        flowlines[["NHDPlusID", "sizeclass", "streamorder"]], on="origLineID"
+        flowlines[["NHDPlusID", "waterbody"]], on="origLineID"
     )
 
     # calculate length and sinuosity
@@ -73,21 +41,13 @@ def prep_new_flowlines(flowlines, new_segments):
     new_flowlines["sinuosity"] = new_flowlines.geometry.apply(calculate_sinuosity)
 
     return new_flowlines[
-        [
-            "lineID",
-            "NHDPlusID",
-            "sizeclass",
-            "streamorder",
-            "length",
-            "sinuosity",
-            "geometry",
-        ]
+        ["lineID", "NHDPlusID", "waterbody", "length", "sinuosity", "geometry"]
     ]
 
 
 def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     """Cut flowlines by barriers.
-    
+
     Parameters
     ----------
     flowlines : GeoDataFrame
@@ -98,7 +58,7 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
         Joins between flowlines (upstream, downstream pairs).
     next_segment_id : int, optional
         Used as starting point for IDs of new segments created by cutting flowlines.
-    
+
     Returns
     -------
     GeoDataFrame, DataFrame, DataFrame
@@ -146,10 +106,14 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     # we assign N/A to 0.
 
     upstream_barrier_joins = (
-        barrier_segments.loc[barrier_segments.on_upstream][["barrierID", "lineID"]]
-        .rename(columns={"lineID": "downstream_id"})
-        .join(joins.set_index("downstream_id").upstream_id, on="downstream_id")
-    ).fillna(0)
+        (
+            barrier_segments.loc[barrier_segments.on_upstream][["barrierID", "lineID"]]
+            .rename(columns={"lineID": "downstream_id"})
+            .join(joins.set_index("downstream_id").upstream_id, on="downstream_id")
+        )
+        .fillna(0)
+        .astype("uint64")
+    )
 
     # Barriers on downstream endpoint:
     # their upstream_id is the segment they are on and their downstream_id is the
@@ -158,10 +122,16 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     # network (downstream terminal) and further downstream segments were removed due to removing
     # coastline segments.
     downstream_barrier_joins = (
-        barrier_segments.loc[barrier_segments.on_downstream][["barrierID", "lineID"]]
-        .rename(columns={"lineID": "upstream_id"})
-        .join(joins.set_index("upstream_id").downstream_id, on="upstream_id")
-    ).fillna(0)
+        (
+            barrier_segments.loc[barrier_segments.on_downstream][
+                ["barrierID", "lineID"]
+            ]
+            .rename(columns={"lineID": "upstream_id"})
+            .join(joins.set_index("upstream_id").downstream_id, on="upstream_id")
+        )
+        .fillna(0)
+        .astype("uint64")
+    )
 
     barrier_joins = upstream_barrier_joins.append(
         downstream_barrier_joins, ignore_index=True, sort=False
@@ -222,6 +192,7 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     )
 
     # pivot list of geometries into rows and assign new IDs
+    # TODO: this could probably use explode() instead
     new_segments = gp.GeoDataFrame(
         geoms.apply(pd.Series)
         .stack()
@@ -250,10 +221,18 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
 
     # Update existing joins with the new lineIDs we created at the upstream or downstream
     # ends of segments we just created
-    updated_joins = update_joins(joins, first, last)
+    updated_joins = update_joins(
+        joins, first, last, downstream_col="downstream_id", upstream_col="upstream_id"
+    )
 
     # also need to update any barrier joins already created for those on endpoints
-    barrier_joins = update_joins(barrier_joins, first, last)
+    barrier_joins = update_joins(
+        barrier_joins,
+        first,
+        last,
+        downstream_col="downstream_id",
+        upstream_col="upstream_id",
+    )
 
     # create upstream & downstream ids per original line
     upstream_side = (
@@ -296,4 +275,3 @@ def cut_flowlines(flowlines, barriers, joins, next_segment_id=None):
     ).set_index("barrierID", drop=False)
 
     return updated_flowlines, updated_joins, barrier_joins.astype("uint32")
-

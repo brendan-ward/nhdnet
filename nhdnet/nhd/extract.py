@@ -1,24 +1,3 @@
-"""Extract NHD data to simpler data formats for later processing
-
-Run this first!
-
-1. Read NHDFlowline and convert to 2D lines
-2. Join to VAA and bring in select attributes
-2. Project to USGS CONUS Albers (transient geom)
-3. Calculate sinuosity and length
-4. Write to shapefile
-5. Write to CSV
-
-Note: NHDPlusIDs are converted to uint64 for internal processing.
-These need to be converted back to float64 for use in shapefiles and such
-
-TODO: add other attributes to keep throughout, including size info for plotting
-
-If a HUC4 raises an invalid geometry error when trying to read it, use ogr2ogr to convert it first:
-ogr2ogr -f "ESRI Shapefile" NHDFlowline.shp  NHDPLUS_H_0601_HU4_GDB.gdb NHDFlowline
-
-"""
-
 import os
 import geopandas as gp
 import pandas as pd

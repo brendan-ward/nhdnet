@@ -9,6 +9,8 @@ rtree = "*"
 feather-format = "*"
 requests = "*"
 geofeather = "*"
+shapely = "==1.7a2"
+pygeos = "*"
 
 [dev-packages]
 pylint = "*"

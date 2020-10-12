@@ -135,8 +135,7 @@ def remove_joins(df, ids, downstream_col="downstream", upstream_col="upstream"):
 
     Returns
     -------
-    [type]
-        [description]
+    DataFrame
     """
 
     # Update any joins that would have connected to these ids
@@ -169,3 +168,68 @@ def remove_joins(df, ids, downstream_col="downstream", upstream_col="upstream"):
     return df.loc[
         ~(df[upstream_col].isin(ids) | (df[downstream_col].isin(ids)))
     ].drop_duplicates()
+
+
+def update_joins(
+    joins,
+    new_downstreams,
+    new_upstreams,
+    downstream_col="downstream",
+    upstream_col="upstream",
+):
+    """
+    Update new upstream and downstream segment IDs into joins table.
+
+    Parameters
+    ----------
+    joins : DataFrame
+        contains records with upstream_id and downstream_id representing joins between segments
+    new_dowstreams : Series
+        Series, indexed on original line ID, with the new downstream ID for each original line ID
+    new_upstreams : Series
+        Series, indexed on original line ID, with the new upstream ID for each original line ID
+    downstream_col : str, optional (default "downstream")
+        Name of column containing downstream ids
+    upstream_col : str, optional (default "upstream")
+        Name of column containing upstream ids
+
+    Returns
+    -------
+    DataFrame
+    """
+    joins = joins.join(new_downstreams, on=downstream_col).join(
+        new_upstreams, on=upstream_col
+    )
+
+    # copy new downstream IDs across
+    idx = joins.new_downstream_id.notnull()
+    joins.loc[idx, downstream_col] = joins[idx][new_downstreams.name].astype("uint32")
+
+    # copy new upstream IDs across
+    idx = joins.new_upstream_id.notnull()
+    joins.loc[idx, upstream_col] = joins[idx][new_upstreams.name].astype("uint32")
+
+    return joins.drop(columns=["new_downstream_id", "new_upstream_id"])
+
+
+def find_downstream_terminals(df, downstream_col="downstream", upstream_col="upstream"):
+    """Find the downstream-most segments of a set of segments.
+    By definition, their downstream is not in the set of joins.
+
+    Returns a series containing the IDs of these downstream-most segments.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Data frame containing the pairs of upstream_col and downstream_col that
+        represent the joins between segments.
+    downstream_col : str, optional (default "downstream")
+        Name of column containing downstream ids
+    upstream_col : str, optional (default "upstream")
+        Name of column containing upstream ids
+
+    Returns
+    -------
+    Series
+    """
+    return df.loc[~df[downstream_col].isin(df[upstream_col]), upstream_col]
