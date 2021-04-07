@@ -1,7 +1,18 @@
-# U.S. National Hydrography Dataset Network & Barrier Analysis Tools
+# ARCHIVED - U.S. National Hydrography Dataset Network & Barrier Analysis Tools
 
 [![Build Status](https://travis-ci.org/brendan-ward/nhdnet.svg?branch=master)](https://travis-ci.org/brendan-ward/nhdnet)
 [![Coverage Status](https://coveralls.io/repos/github/brendan-ward/nhdnet/badge.svg?branch=master)](https://coveralls.io/github/brendan-ward/nhdnet?branch=master)
+
+
+## Status
+
+This library has been archived as a stand-alone project and is no longer being actively developed.
+
+
+All NHD-related processing for the [Southeast Aquatic Barrier Prioritization Tool](https://connectivity.sarpdata.com) has been subsumed into [https://github.com/astutespruce/sarp-connectivity](https://github.com/astutespruce/sarp-connectivity).
+
+
+## Overview
 
 This library was used to help perform network connectivity analysis for the [Southeast Aquatic Barrier Prioritization Tool](https://connectivity.sarpdata.com). See [https://github.com/astutespruce/sarp-connectivity](https://github.com/astutespruce/sarp-connectivity) for more information about specific processing for that project.
 
