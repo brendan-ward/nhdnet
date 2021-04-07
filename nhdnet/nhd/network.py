@@ -6,14 +6,14 @@ def generate_network(root_id, upstreams):
     """Generate the upstream network from a starting id.
 
     Intended to be used within an .apply() call
-    
+
     Parameters
     ----------
     root_id : id type (int, str)
         starting segment id that forms the root node of the upstream network
     upstreams : dict
         Dictionary created from Pandas groupby().groups - keys are downstream_ids, values are upstream_ids
-    
+
     Returns
     -------
     list of all upstream ids in network traversing upward from root_id
@@ -36,14 +36,14 @@ def generate_networks(root_ids, upstreams):
     """Generate the upstream networks for each root ID in root_ids.
     IMPORTANT: this will produce multiple upstream networks from a given starting point
     if the starting point is located at the junction of multiple upstream networks.
-    
+
     Parameters
     ----------
     root_ids : pandas.Series
         Series of root IDs (downstream-most ID) for each network to be created
     upstreams : dict
         Dictionary created from Pandas groupby().groups - keys are downstream_ids, values are upstream_ids
-    
+
     Returns
     -------
     pandas.DataFrame
