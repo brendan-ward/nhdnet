@@ -1,17 +1,42 @@
 import os
+import pygeos as pg
 import geopandas as gp
 import pandas as pd
-from shapely.geometry import MultiLineString
-from nhdnet.geometry.lines import to2D as line2D, calculate_sinuosity
-from nhdnet.geometry.polygons import to2D as poly2D
-from nhdnet.nhd.joins import index_joins, find_joins
+from pyogrio import read_dataframe
 
-FLOWLINE_COLS = ["NHDPlusID", "FlowDir", "FType", "GNIS_ID", "GNIS_Name", "geometry"]
+from nhdnet.geometry.lines import calculate_sinuosity
 
-# TODO: add elevation gradient info
-VAA_COLS = ["NHDPlusID", "StreamOrde", "StreamCalc", "TotDASqKm"]
 
-WATERBODY_COLS = ["NHDPlusID", "FType", "AreaSqKm", "geometry"]
+FLOWLINE_COLS = [
+    "NHDPlusID",
+    "FlowDir",
+    "FType",
+    "FCode",
+    "GNIS_ID",
+    "GNIS_Name",
+    "geometry",
+]
+
+VAA_COLS = [
+    "NHDPlusID",
+    "StreamOrde",
+    "StreamLeve",
+    "StreamCalc",
+    "TotDASqKm",
+    "Slope",
+    "MinElevSmo",
+    "MaxElevSmo",
+]
+
+WATERBODY_COLS = [
+    "NHDPlusID",
+    "FType",
+    "FCode",
+    "GNIS_ID",
+    "GNIS_Name",
+    "AreaSqKm",
+    "geometry",
+]
 
 
 def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
@@ -40,20 +65,25 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     ### Read in flowline data and convert to data frame
     print("Reading flowlines")
     flowline_cols = FLOWLINE_COLS + extra_flowline_cols
-    df = gp.read_file(gdb_path, layer="NHDFlowline")[flowline_cols]
+    df = read_dataframe(
+        gdb_path, layer="NHDFlowline", force_2d=True, columns=[flowline_cols]
+    )
+
     print("Read {:,} flowlines".format(len(df)))
 
     # Index on NHDPlusID for easy joins to other NHD data
     df.NHDPlusID = df.NHDPlusID.astype("uint64")
     df = df.set_index(["NHDPlusID"], drop=False)
 
+    # convert MultiLineStrings to LineStrings (all have a single linestring)
+    df.geometry = pg.get_geometry(df.geometry.values.data, 0)
+
     ### Read in VAA and convert to data frame
     # NOTE: not all records in Flowlines have corresponding records in VAA
     # we drop those that do not since we need these fields.
     print("Reading VAA table and joining...")
-    vaa_df = gp.read_file(gdb_path, layer="NHDPlusFlowlineVAA")[VAA_COLS].rename(
-        columns={"StreamOrde": "streamorder"}
-    )
+    vaa_df = read_dataframe(gdb_path, layer="NHDPlusFlowlineVAA", columns=[VAA_COLS])
+
     vaa_df.NHDPlusID = vaa_df.NHDPlusID.astype("uint64")
     vaa_df = vaa_df.set_index(["NHDPlusID"])
     df = df.join(vaa_df, how="inner")
@@ -61,7 +91,11 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
 
     # Simplify data types for smaller files and faster IO
     df.FType = df.FType.astype("uint16")
-    df.streamorder = df.streamorder.astype("uint8")
+    df.FCode = df.FCode.astype("uint16")
+    df.StreamOrde = df.StreamOrde.astype("uint8")
+    df.Slope = df.Slope.astype("float32")
+    df.MinElevSmo = df.MinElevSmo.astype("float32")
+    df.MaxElevSmo = df.MaxElevSmo.astype("float32")
 
     ### Read in flowline joins
     print("Reading flowline joins")
@@ -71,18 +105,14 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     join_df.upstream = join_df.upstream.astype("uint64")
     join_df.downstream = join_df.downstream.astype("uint64")
 
-    ### Label loops for easier removal later, if we need to
+    ### Label loops for easier removal later
     # WARNING: loops may be very problematic from a network processing standpoint.
     # Include with caution.
     print("Identifying loops")
-    df["loop"] = False
-    df.loc[(df.streamorder != df.StreamCalc) | (df.FlowDir.isnull()), "loop"] = True
+    df["loop"] = (df.StreamOrde != df.StreamCalc) | (df.FlowDir.isnull())
 
     idx = df.loc[df.loop].index
-    join_df["loop"] = False
-    join_df.loc[
-        join_df.upstream.isin(idx) | join_df.downstream.isin(idx), "loop"
-    ] = True
+    join_df["loop"] = join_df.upstream.isin(idx) | join_df.downstream.isin(idx)
 
     ### Filter out coastlines and update joins
     # WARNING: we tried filtering out pipelines (FType == 428).  It doesn't work properly;
@@ -133,14 +163,6 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     df.loc[(drainage >= 10000) & (drainage < 25000), "sizeclass"] = "4"
     df.loc[drainage >= 25000, "sizeclass"] = "5"
 
-    # convert to LineString from MultiLineString
-    idx = df.loc[df.geometry.type == "MultiLineString"].index
-    df.loc[idx, "geometry"] = df.loc[idx].geometry.apply(lambda g: g[0])
-
-    # Convert incoming data from XYZM to XY
-    print("Converting geometry to 2D")
-    df.geometry = df.geometry.apply(line2D)
-
     print("projecting to target projection")
     df = df.to_crs(target_crs)
 
@@ -154,6 +176,9 @@ def extract_flowlines(gdb_path, target_crs, extra_flowline_cols=[]):
     join_df.loc[join_df.upstream == 0, "type"] = "origin"
     join_df.loc[join_df.downstream == 0, "type"] = "terminal"
     join_df.loc[(join_df.upstream != 0) & (join_df.upstream_id == 0), "type"] = "huc_in"
+
+    # drop columns not useful for later processing steps
+    df = df.drop(columns=["FlowDir", "StreamCalc"])
 
     return df, join_df
 
@@ -178,7 +203,9 @@ def extract_waterbodies(gdb_path, target_crs, exclude_ftypes=[], min_area=0):
     GeoDataFrame
     """
     print("Reading waterbodies")
-    df = gp.read_file(gdb_path, layer="NHDWaterbody")[WATERBODY_COLS]
+    df = read_dataframe(
+        gdb_path, layer="NHDWaterbody", columns=[WATERBODY_COLS], force_2d=True
+    )
     print("Read {:,} waterbodies".format(len(df)))
 
     df = df.loc[
@@ -192,11 +219,7 @@ def extract_waterbodies(gdb_path, target_crs, exclude_ftypes=[], min_area=0):
 
     # Convert multipolygons to polygons
     # those we checked that are true multipolygons are errors
-    idx = df.loc[df.geometry.type == "MultiPolygon"].index
-    df.loc[idx, "geometry"] = df.loc[idx].geometry.apply(lambda g: g[0])
-
-    print("Converting geometry to 2D")
-    df.geometry = df.geometry.apply(poly2D)
+    df.geometry = pg.get_geometry(df.geometry.values.data, 0)
 
     print("projecting to target projection")
     df = df.to_crs(target_crs)

@@ -19,7 +19,7 @@ def find_join(df, id, downstream_col="downstream", upstream_col="upstream"):
     return df.loc[(df[upstream_col] == id) | (df[downstream_col] == id)]
 
 
-def find_joins(df, ids, downstream_col="downstream", upstream_col="upstream"):
+def find_joins(df, ids, downstream_col="downstream", upstream_col="upstream", expand=0):
     """Find the joins for a given segment id in a joins table.
 
     Parameters
@@ -32,12 +32,25 @@ def find_joins(df, ids, downstream_col="downstream", upstream_col="upstream"):
         name of downstream column
     upstream_col : str, optional (default "upstream")
         name of upstream column
+    expand : positive int, optional (default 0)
+        If > 0, will expand the search to "expand" degrees from the original ids.
+        E.g., if expand is 2, this will return all nonzero joins that are within 2
+        joins of the original set of ids.
 
     Returns
     -------
     Joins that have the id as an upstream or downstream.
     """
-    return df.loc[(df[upstream_col].isin(ids)) | (df[downstream_col].isin(ids))]
+    out = df.loc[(df[upstream_col].isin(ids)) | (df[downstream_col].isin(ids))]
+
+    # find all upstream / downstream joins of ids returned at each iteration
+    for i in range(expand):
+        next_ids = (set(out[upstream_col]) | set(out[downstream_col])) - {0}
+        out = df.loc[
+            (df[upstream_col].isin(next_ids)) | (df[downstream_col].isin(next_ids))
+        ]
+
+    return out
 
 
 def index_joins(df, downstream_col="downstream", upstream_col="upstream"):
@@ -64,14 +77,14 @@ def index_joins(df, downstream_col="downstream", upstream_col="upstream"):
     DataFrame
     """
 
-    return (
+    df = (
         df.loc[df[downstream_col] != 0]
         .set_index(downstream_col)[[upstream_col]]
         .join(df.set_index(upstream_col)[[downstream_col]])
-        .reset_index()
-        .drop_duplicates()
-        .set_index("index")
     )
+    df.index.name = "index"
+
+    return df.reset_index().drop_duplicates().set_index("index")
 
 
 def create_upstream_index(

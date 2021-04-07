@@ -233,4 +233,3 @@ def snap_to_point(df, target_points, tolerance=100, sindex=None):
 
     # NOTE: this drops any points that didn't get snapped
     return df.drop(columns=["geometry"]).join(snapped).dropna(subset=["geometry"])
-
